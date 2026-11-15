@@ -5,23 +5,34 @@
 It powers the **SautiLM** family of offline mobile language models engineered for low-resource African languages (starting with **Bbadha / Kilendu** and **Congolese Swahili**) and critical community domains in Eastern DRC.
 
 - **Official Website**: [https://sautilm.com](https://sautilm.com)
-- **Hugging Face Model Hub**: [https://huggingface.co/sautilm/SautiLM-v1](https://huggingface.co/sautilm/SautiLM-v1)
+- **Hugging Face Model Hub (`SautiLM Jua`)**: [https://huggingface.co/sautilm/SautiLM-Jua](https://huggingface.co/sautilm/SautiLM-Jua)
 - **Organization**: LosingTek Research (Bunia, Ituri, DRC)
 
 ---
 
-## 1. Architecture & Product Family
+## 1. SautiLM Foundation Series & 10 Specialized Domain Models
 
-`SautiLM-Forge` builds the foundation corpus and training pipeline for the **SautiLM** ecosystem:
+### Foundation Model Series (3-4 Letter Swahili / Kingwana Names)
+- **`SautiLM Jua`** (*Sun / Knowledge*) : Sub-100 MB Edge-AI foundation model (`92.48 MB`, Active on Hugging Face)
+- **`SautiLM Nuru`** (*Light / Clarity*) : Mid-sized multimodal & reasoning model (In development)
+- **`SautiLM Wazo`** (*Thought / Deep Reasoning*) : Analytical model for law, STEM, and research (In development)
+- **`SautiLM Moto`** (*Fire / High Speed*) : Ultra-low-latency streaming and voice model (In development)
+- **`SautiLM Kuu`** (*Supreme / Flagship*) : Full-scale institutional model for universities, courts, and hospitals (In development)
+- **`SautiLM Mali`** (*Heritage / Treasure*) : Sovereign linguistic and cultural corpus foundation (In development)
 
+### 10 Specialized Domain Modules
 | Model | Target Domain | Core Capabilities |
 | :--- | :--- | :--- |
-| **`SautiLM-v1`** | Unified Omni Edge ($\le 150\text{ MB}$) | Compact mobile foundation model distilled from Google Gemma 3 (`270M-IT`) for 2 GB - 4 GB RAM Android phones |
-| **`SautiLM-Lex`** | East-DRC Indigenous Languages | Bidirectional translation & grammatical dictionary for Bbadha (Kilendu), Kiswahili, French, and English |
-| **`SautiLM-Edu`** | Mother-Tongue Education | Offline pocket tutor for environmental science, biology, literacy, and interactive quizzes |
-| **`SautiLM-Math`** | Contextual Arithmetic | Step-by-step arithmetic and pastoralist commerce calculations in Congolese Francs (FC) |
-| **`SautiLM-Med`** | Community Health & Livestock | Actionable prevention guides for water sanitation, cholera, malaria, nutrition, and veterinary care |
-| **`SautiLM-Ius`** | Offline Congolese Law | Legal assistant grounded in the DRC Constitution, revised Family Code (Loi n° 16/008), Penal Code, Labor Code, and OHADA Law |
+| **`SautiLM-Lex`** | Lexicography & Translation | Bidirectional translation & grammatical dictionary for Bbadha (Kilendu), Kiswahili, French, and English |
+| **`SautiLM-Edu`** | Education & General Sciences | Offline tutor for general sciences, biology, physics, and environment |
+| **`SautiLM-Math`** | Mathematics & Logic | Verified arithmetic, percentages, algebra, and commercial calculations |
+| **`SautiLM-Med`** | Public Health & Medicine | Clinical triage, water sanitation, oral rehydration (ORS), and disease prevention |
+| **`SautiLM-Ius`** | Congolese Law & Justice | Legal assistant grounded in the DRC Constitution, revised Family Code (Loi n° 16/008), Penal Code, Labor Code, and OHADA Law |
+| **`SautiLM-Vision`** | Camera OCR & Visual Analysis | Offline optical character recognition for written exercises and visual plant/document diagnostics |
+| **`SautiLM-Voice`** | Phonetics & Orality | Tonal pronunciation guidance and speech interface for Eastern DRC languages |
+| **`SautiLM-Agri`** | Agronomy & Crops | Field diagnosis for cassava mosaic, maize rust, coffee wilt, composting, and soil fertility |
+| **`SautiLM-Fin`** | Finance, SME Accounting & AVEC | Cooperative accounting, village savings (VSLA/AVEC), and FC/USD calculations |
+| **`SautiLM-Civ`** | Civic Administration | Civil status registration (`Acte de naissance`), public services, and community mediation |
 
 ---
 
