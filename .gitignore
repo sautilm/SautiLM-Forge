@@ -1,0 +1,37 @@
+# ============================================================================
+# SECURITE ABSOLUE : Ne jamais versionner ni envoyer les cles hors de ce PC
+# ============================================================================
+.env
+.env.*
+!.env.example
+*.env
+kaggle.json
+.kaggle/
+*.key
+*.pem
+*.token
+secrets/
+
+# Environnement Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Corpus proprietaire complet (protege - seul le schema d'exemple est public)
+data/sautilm_v1_train.jsonl
+data/bbadha_full_lexicon.json
+
+# Artefacts lourds & checkpoints locaux
+build/
+dist/
+models/
+checkpoints/
+kaggle_output/sautilm_v1_lora_adapter/
+kaggle_output/*.log
+*.litertlm
+*.gguf
+*.tflite
+*.bin
+*.safetensors

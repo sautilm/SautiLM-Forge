@@ -1,0 +1,15 @@
+{
+  "lexicon_count": 1150,
+  "total_instructions": 22834,
+  "domain_counts": {
+    "identity": 60,
+    "lex": 22557,
+    "math": 52,
+    "edu": 30,
+    "med": 30,
+    "ius": 60,
+    "vision": 45
+  },
+  "train_jsonl_path": "C:\\Users\\ADMIN\\Desktop\\MiProjects\\Python\\SautiLM-Forge\\data\\sautilm_v1_train.jsonl",
+  "mobile_lexicon_path": "C:\\Users\\ADMIN\\Desktop\\MiProjects\\Python\\SautiLM-Forge\\data\\bbadha_full_lexicon.json"
+}
