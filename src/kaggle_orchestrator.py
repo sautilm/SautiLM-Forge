@@ -201,7 +201,7 @@ Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nu
 
 ## Research & Founding Team (SautiLM / LosingTek)
 
-- **Georges Byona** - Co-Founder & Software Engineer (Catholic University of Eastern Africa / LosingTek)
+- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / LosingTek)
 - **Abraham Imani** - Co-Founder, MSc Student & AI/ML Lead (Université Catholique de Bukavu)
 - **Jacques Uwonda** - Co-Founder, MSc Student & Software Engineer (Université Shalom de Bunia)
 

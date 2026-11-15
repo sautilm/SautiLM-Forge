@@ -86,7 +86,7 @@ python src/kaggle_orchestrator.py status
 
 ## 4. Founding & Research Team (LosingTek Research)
 
-- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher
+- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / LosingTek)
 - **Abraham Imani** - Co-Founder & AI/ML Lead (Université Catholique de Bukavu)
 - **Jacques Uwonda** - Co-Founder & Software Engineer (Université Shalom de Bunia)
 
