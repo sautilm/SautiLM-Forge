@@ -153,28 +153,35 @@ tags:
 pipeline_tag: text-generation
 ---
 
-# SautiLM-v1 (Omni Edge <= 150 MB)
+# SautiLM Jua (Edge-AI Foundation Model <= 150 MB)
 
-**SautiLM-v1** is the first ultra-compact, 100% offline Edge-AI language model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**, serving marginalized linguistic communities, displaced learners, community health workers, and legal practitioners in Eastern DRC.
+**SautiLM Jua** (*Jua* = "The Sun" & "To Know" in Swahili/Kingwana) is the first ultra-compact, 100% offline Edge-AI foundation model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
 
-Distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervised Fine-Tuning (SFT) on **22,834 verified instructions** and compressed to **{size_mb} MB** in native `.litertlm` container format, `SautiLM-v1` runs smoothly on entry-level 2 GB - 4 GB RAM Android smartphones with zero internet connection, zero battery overheating, and zero data cost.
+Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nuru**, **Wazo**, **Moto**, **Kuu**, **Mali**), **SautiLM Jua** is distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervised Fine-Tuning (SFT) on **22,834 verified instructions** and compressed to **{size_mb} MB** in native `.litertlm` container format (`sautilm-jua.litertlm`), running smoothly on entry-level 2 GB - 4 GB RAM Android smartphones with zero internet connection and zero data cost.
 
 ---
 
-## Core Capabilities & SautiLM Product Family
+## SautiLM Foundation Series & 10 Specialized Domain Models
 
-`SautiLM-v1` serves as the unified foundation for the five specialized SautiLM domains:
+### Foundation Model Series (3-4 Letter Swahili / Kingwana Names)
+- **SautiLM Jua** (*Sun / Knowledge*) : Sub-100 MB Edge-AI foundation model (`{size_mb} MB`, Active)
+- **SautiLM Nuru** (*Light / Clarity*) : Mid-sized multimodal & reasoning model (In development)
+- **SautiLM Wazo** (*Thought / Deep Reasoning*) : Analytical model for law, STEM, and research (In development)
+- **SautiLM Moto** (*Fire / High Speed*) : Ultra-low-latency streaming and voice model (In development)
+- **SautiLM Kuu** (*Supreme / Flagship*) : Full-scale institutional model for universities, courts, and hospitals (In development)
+- **SautiLM Mali** (*Heritage / Treasure*) : Sovereign linguistic and cultural corpus foundation (In development)
 
-1. **SautiLM-Lex (East-DRC Lexicography & Translation)** :
-   - Trained on **1,150 verified Bbadha (Kilendu) dictionary entries** (`a.json` to `z.json`), phonetics, grammatical classes, multiple senses, and trilingual example sentences (**Bbadha - Kiswahili - French**).
-2. **SautiLM-Edu (Mother-Tongue Pocket Tutor)** :
-   - Curriculum-aligned explanations in environmental science (water cycle, solar energy, reforestation), biology, and interactive quizzes.
-3. **SautiLM-Math (Contextual Arithmetic & Pastoralist Commerce)** :
-   - Step-by-step arithmetic proofs for livestock inventory (`Dyà`, `Bbi`), dairy market trade in Congolese Francs (FC), and school resource distribution.
-4. **SautiLM-Med (Community Health & Veterinary Care)** :
-   - Three-step actionable guides for clean water purification (`Dda`), cholera and malaria prevention (`Rra`), nutrition (`Zzà`), and pastoral livestock care.
-5. **SautiLM-Ius (Offline Congolese Law Assistant)** :
-   - Grounded in the **Constitution of the DRC**, the **revised Family Code (Loi n° 16/008)**, the **Congolese Penal Code**, the **Labor Code**, and **OHADA Law** to assist citizens, lawyers, and magistrates offline.
+### 10 Specialized Domain Modules Powered by SautiLM Jua
+1. **SautiLM-Lex (Lexicography & Translation)** : Trained on **1,150 verified Bbadha (Kilendu) dictionary entries**, phonetics, grammatical classes, and trilingual examples (**Bbadha - Kiswahili - French/English**).
+2. **SautiLM-Edu (Education & General Sciences)** : Curriculum-aligned explanations in biology, physics, environmental science, and general knowledge.
+3. **SautiLM-Math (Mathematics & Quantitative Logic)** : Verified arithmetic, percentages, algebra, and commercial calculations.
+4. **SautiLM-Med (Public Health & Medical Triage)** : Actionable protocols for water sanitation (`Dda`), oral rehydration (ORS), cholera/malaria prevention (`Rra`), and nutrition (`Zzà`).
+5. **SautiLM-Ius (Congolese Law & Justice)** : Grounded in the **Constitution of the DRC**, the **revised Family Code (Loi n° 16/008)**, the **Penal Code**, the **Labor Code**, and **OHADA Law**.
+6. **SautiLM-Vision (Camera OCR & Visual Diagnostics)** : Offline optical character recognition for written exercises and visual plant/document analysis.
+7. **SautiLM-Voice (Phonetics & Orality)** : Tonal pronunciation guidance and speech interface for Eastern DRC languages.
+8. **SautiLM-Agri (Agronomy & Crop Protection)** : Field diagnosis for cassava mosaic, maize rust, coffee wilt, composting, and soil conservation.
+9. **SautiLM-Fin (Finance, SME Accounting & AVEC)** : Cooperative accounting, village savings (VSLA/AVEC), and FC/USD trade calculations.
+10. **SautiLM-Civ (Civic Administration & Mediation)** : Civil status registration (`Acte de naissance`), public services, and peaceful community mediation (`Kawa`).
 
 ---
 
@@ -182,10 +189,10 @@ Distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervi
 
 | Specification | Value |
 | :--- | :--- |
-| **Model Identifier** | `sautilm/SautiLM-v1` |
-| **Primary Mobile Bundle** | `sautilm-v1.litertlm` ({size_mb} MB) |
+| **Model Identifier** | `sautilm/SautiLM-Jua` |
+| **Primary Mobile Bundle** | `sautilm-jua.litertlm` ({size_mb} MB) |
 | **Parent Architecture** | Google Gemma 3 (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`) |
-| **Training Corpus** | 22,834 instructions (1,150 Bbadha words + Math + Edu + Med + Congolese Law) |
+| **Training Corpus** | 22,834 instructions (1,150 Bbadha words + Math + Edu + Med + Congolese Law + Vision) |
 | **Training Steps / Final Loss** | {steps} steps (LoRA `r=16, alpha=32`) / Loss: `{final_loss}` |
 | **Target Runtime** | Flutter (`flutter_edge_ai` + `flutter_edge_ai_litertlm` v1.19+) |
 | **Minimum Hardware** | Android 8.0+ (API 26+), 2 GB RAM, ARM Cortex-A53/A55 CPU or Mobile GPU |
@@ -204,12 +211,12 @@ Engineered & Supported by [LosingTek](https://losingtek.com)
 
 
 def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
-    """Initializes https://huggingface.co/sautilm/SautiLM-v1 and uploads model artifacts."""
+    """Initializes https://huggingface.co/sautilm/SautiLM-Jua and uploads model artifacts."""
     auth = _load_local_auth()
     hf_api = HfApi(token=auth["hf_token"])
     user_info = hf_api.whoami()
     hf_owner = user_info.get("name", "sautilm")
-    repo_id = f"{hf_owner}/SautiLM-v1"
+    repo_id = f"{hf_owner}/SautiLM-Jua"
 
     create_repo(repo_id=repo_id, token=auth["hf_token"], repo_type="model", exist_ok=True, private=False)
     print(f"[SautiLM-Forge] Hugging Face repository ready: https://huggingface.co/{repo_id}")
@@ -241,6 +248,12 @@ def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
         litertlm_file = OUTPUT_DIR / "sautilm-v1.litertlm"
         if litertlm_file.exists():
             print(f"[SautiLM-Forge] Uploading {litertlm_file.name} to {repo_id}...")
+            hf_api.upload_file(
+                path_or_fileobj=str(litertlm_file),
+                path_in_repo="sautilm-jua.litertlm",
+                repo_id=repo_id,
+                repo_type="model",
+            )
             hf_api.upload_file(
                 path_or_fileobj=str(litertlm_file),
                 path_in_repo="sautilm-v1.litertlm",
