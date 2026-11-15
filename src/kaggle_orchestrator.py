@@ -155,7 +155,7 @@ pipeline_tag: text-generation
 
 # SautiLM-v1 (Omni Edge <= 150 MB)
 
-**SautiLM-v1** is the first ultra-compact, 100% offline Edge-AI language model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for marginalized linguistic communities, displaced learners, community health workers, and legal practitioners in Eastern DRC.
+**SautiLM-v1** is the first ultra-compact, 100% offline Edge-AI language model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **SautiLM** for marginalized linguistic communities, displaced learners, community health workers, and legal practitioners in Eastern DRC.
 
 Distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervised Fine-Tuning (SFT) on **22,834 verified instructions** and compressed to **{size_mb} MB** in native `.litertlm` container format, `SautiLM-v1` runs smoothly on entry-level 2 GB - 4 GB RAM Android smartphones with zero internet connection, zero battery overheating, and zero data cost.
 
@@ -192,13 +192,14 @@ Distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervi
 
 ---
 
-## Research & Founding Team (LosingTek Research)
+## Research & Founding Team (SautiLM)
 
-- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / LosingTek)
-- **Abraham Imani** - Co-Founder & AI/ML Lead (Université Catholique de Bukavu)
-- **Jacques Uwonda** - Co-Founder & Software Engineer (Université Shalom de Bunia)
+- **Georges Byona** - Co-Founder & Software Engineer (Catholic University of Eastern Africa)
+- **Abraham Imani** - Co-Founder, MSc Student & AI/ML Lead (Université Catholique de Bukavu)
+- **Jacques Uwonda** - Co-Founder, MSc Student & Software Engineer (Université Shalom de Bunia)
 
 Website: [https://sautilm.com](https://sautilm.com)
+Supported by [LosingTek](https://losingtek.com)
 """
 
 
@@ -226,12 +227,6 @@ def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
     hf_api.upload_file(
         path_or_fileobj=str(readme_path),
         path_in_repo="README.md",
-        repo_id=repo_id,
-        repo_type="model",
-    )
-    hf_api.upload_file(
-        path_or_fileobj=str(DATA_DIR / "bbadha_full_lexicon.json"),
-        path_in_repo="bbadha_full_lexicon.json",
         repo_id=repo_id,
         repo_type="model",
     )
