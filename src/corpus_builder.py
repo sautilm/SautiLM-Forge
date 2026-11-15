@@ -204,20 +204,29 @@ def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, 
             if fr and fr not in fr_list:
                 fr_list.append(fr)
 
+            sense_complete: List[Dict[str, str]] = []
+            sense_partial: List[Dict[str, str]] = []
             for ex in m.get("examples") or []:
                 if not isinstance(ex, dict):
                     continue
                 bb_s = sanitize_sautilm_text(str(ex.get("bbadha_sentence") or ""))
                 sw_s = sanitize_sautilm_text(str(ex.get("swahili_sentence") or ""))
                 fr_s = sanitize_sautilm_text(str(ex.get("french_sentence") or ""))
-                if bb_s or sw_s or fr_s:
-                    examples_list.append(
-                        {
-                            "bbadha": bb_s,
-                            "swahili": sw_s,
-                            "french": fr_s,
-                        }
-                    )
+                item_ex = {
+                    "bbadha": bb_s,
+                    "swahili": sw_s,
+                    "french": fr_s,
+                }
+                if bb_s and sw_s and fr_s:
+                    sense_complete.append(item_ex)
+                elif bb_s and (sw_s or fr_s):
+                    sense_partial.append(item_ex)
+            examples_list.extend(sense_complete[:3] + sense_partial[:1])
+
+        # Ensure complete trilingual examples come first across senses
+        examples_list.sort(
+            key=lambda x: 0 if (x["bbadha"] and x["swahili"] and x["french"]) else 1
+        )
 
         primary_sw = " ; ".join(sw_list[:3]) if sw_list else word_bbadha
         primary_fr = " ; ".join(fr_list[:3]) if fr_list else word_bbadha
@@ -267,7 +276,7 @@ def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, 
                 "noteEn": " ".join(meta_parts_en),
                 "noteFr": " ".join(meta_parts_fr),
                 "noteSw": " ".join(meta_parts_sw),
-                "examples": examples_list[:3],
+                "examples": examples_list[:6],
             }
         )
     return compiled
