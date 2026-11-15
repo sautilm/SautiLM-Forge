@@ -10,6 +10,6 @@
     "ius": 60,
     "vision": 45
   },
-  "train_jsonl_path": "C:\\Users\\ADMIN\\Desktop\\MiProjects\\Python\\SautiLM-Forge\\data\\sautilm_v1_train.jsonl",
-  "mobile_lexicon_path": "C:\\Users\\ADMIN\\Desktop\\MiProjects\\Python\\SautiLM-Forge\\data\\bbadha_full_lexicon.json"
+  "train_jsonl_path": "data/sautilm_v1_train.jsonl",
+  "mobile_lexicon_path": "data/bbadha_full_lexicon.json"
 }

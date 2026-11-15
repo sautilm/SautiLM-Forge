@@ -155,7 +155,7 @@ pipeline_tag: text-generation
 
 # SautiLM-v1 (Omni Edge <= 150 MB)
 
-**SautiLM-v1** is the first ultra-compact, 100% offline Edge-AI language model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **SautiLM** for marginalized linguistic communities, displaced learners, community health workers, and legal practitioners in Eastern DRC.
+**SautiLM-v1** is the first ultra-compact, 100% offline Edge-AI language model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**, serving marginalized linguistic communities, displaced learners, community health workers, and legal practitioners in Eastern DRC.
 
 Distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervised Fine-Tuning (SFT) on **22,834 verified instructions** and compressed to **{size_mb} MB** in native `.litertlm` container format, `SautiLM-v1` runs smoothly on entry-level 2 GB - 4 GB RAM Android smartphones with zero internet connection, zero battery overheating, and zero data cost.
 
@@ -192,14 +192,14 @@ Distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervi
 
 ---
 
-## Research & Founding Team (SautiLM)
+## Research & Founding Team (SautiLM / LosingTek)
 
-- **Georges Byona** - Co-Founder & Software Engineer (Catholic University of Eastern Africa)
+- **Georges Byona** - Co-Founder & Software Engineer (Catholic University of Eastern Africa / LosingTek)
 - **Abraham Imani** - Co-Founder, MSc Student & AI/ML Lead (Université Catholique de Bukavu)
 - **Jacques Uwonda** - Co-Founder, MSc Student & Software Engineer (Université Shalom de Bunia)
 
 Website: [https://sautilm.com](https://sautilm.com)
-Supported by [LosingTek](https://losingtek.com)
+Engineered & Supported by [LosingTek](https://losingtek.com)
 """
 
 

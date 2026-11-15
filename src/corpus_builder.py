@@ -3,10 +3,9 @@ from pathlib import Path
 import shutil
 from typing import Any, Dict, List
 
-BBADHA_JSON_DIR = Path(r"C:\Users\ADMIN\Desktop\MiProjects\Flutter\bbadha\assets\jsons")
-FLUTTER_SAUTILM_ASSETS_DATA_DIR = Path(
-    r"C:\Users\ADMIN\Desktop\MiProjects\Flutter\sautilm\assets\data"
-)
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+BBADHA_JSON_DIR = WORKSPACE_ROOT / "Flutter" / "bbadha" / "assets" / "jsons"
+FLUTTER_SAUTILM_ASSETS_DATA_DIR = WORKSPACE_ROOT / "Flutter" / "sautilm" / "assets" / "data"
 
 SYSTEM_PROMPT_SAUTILM = (
     "You are SautiLM (SautiLM-v1), an autonomous offline Edge-AI model developed in Bunia, "
@@ -727,8 +726,8 @@ def build_all_corpora(output_dir: Path) -> Dict[str, Any]:
         "lexicon_count": len(mobile_lexicon),
         "total_instructions": len(all_instructions),
         "domain_counts": domain_counts,
-        "train_jsonl_path": str(train_path),
-        "mobile_lexicon_path": str(lex_path),
+        "train_jsonl_path": "data/sautilm_v1_train.jsonl",
+        "mobile_lexicon_path": "data/bbadha_full_lexicon.json",
     }
 
     with open(output_dir / "corpus_stats.json", "w", encoding="utf-8") as f:
