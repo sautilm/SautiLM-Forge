@@ -35,3 +35,4 @@ kaggle_output/*.log
 *.tflite
 *.bin
 *.safetensors
+*.xnnpack_cache

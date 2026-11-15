@@ -34,8 +34,8 @@ def _load_local_auth() -> Dict[str, str]:
     }
 
 
-def publish_dataset_to_kaggle(skip_if_exists: bool = True) -> str:
-    """Uploads the 22,834-instruction SautiLM-v1 corpus as a private Kaggle dataset."""
+def publish_dataset_to_kaggle(skip_if_exists: bool = False) -> str:
+    """Uploads the latest SautiLM Jua corpus as a private Kaggle dataset."""
     auth = _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
 
@@ -72,7 +72,7 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = True) -> str:
         print(f"[SautiLM-Forge] Updating existing private Kaggle dataset: {dataset_ref}")
         api.dataset_create_version(
             str(staging_dir),
-            version_notes="Update SautiLM-v1 22,834 instructions corpus",
+            version_notes="Update SautiLM Jua masked-SFT corpus (no fake vision tags, Role attribution)",
             quiet=False,
             convert_to_csv=False,
             dir_mode="zip",
@@ -127,10 +127,27 @@ def push_gpu_kernel_to_kaggle(dataset_ref: str) -> str:
 
 
 def build_hf_model_card(metrics: Dict[str, Any] | None = None) -> str:
-    """Builds the official Hugging Face Model Card for sautilm/SautiLM-v1."""
-    size_mb = metrics.get("litertlm_size_mb", "<= 145") if metrics else "<= 145"
-    final_loss = f"{metrics['final_loss']:.4f}" if (metrics and metrics.get("final_loss")) else "Converged"
-    steps = metrics.get("steps", 240) if metrics else 240
+    """Builds the official Hugging Face Model Card for sautilm/SautiLM-Jua."""
+    stats_file = DATA_DIR / "corpus_stats.json"
+    corpus_total = 22895
+    lex_count = 1150
+    if stats_file.exists():
+        try:
+            with open(stats_file, "r", encoding="utf-8") as f:
+                st = json.load(f)
+                corpus_total = st.get("total_instructions", corpus_total)
+                lex_count = st.get("lexicon_count", lex_count)
+        except Exception:
+            pass
+
+    size_mb = metrics.get("litertlm_size_mb", "Pending build") if metrics else "Pending build"
+    quant_recipe = metrics.get("quantization_recipe", "dynamic_wi8_afp32") if metrics else "dynamic_wi8_afp32"
+    lora_r = metrics.get("lora_r", 32) if metrics else 32
+    lora_alpha = metrics.get("lora_alpha", 64) if metrics else 64
+    quality_score = metrics.get("litertlm_quality_score", "Pending") if metrics else "Pending"
+    final_loss = f"{metrics['final_loss']:.4f}" if (metrics and metrics.get("final_loss") is not None) else "Pending"
+    steps = metrics.get("steps", "Pending") if metrics else "Pending"
+    verified_badge = f"Verified via LiteRT-LM Runtime ({quality_score})" if (metrics and metrics.get("litertlm_verified")) else "Pending Runtime Verification"
 
     return f"""---
 license: gemma
@@ -153,31 +170,31 @@ tags:
 pipeline_tag: text-generation
 ---
 
-# SautiLM Jua (Edge-AI Foundation Model <= 150 MB)
+# SautiLM Jua (Offline Edge-AI Foundation Model - {size_mb} MB)
 
-**SautiLM Jua** (*Jua* = "The Sun" & "To Know" in Swahili/Kingwana) is the first ultra-compact, 100% offline Edge-AI foundation model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
+**SautiLM Jua** (*Jua* = "The Sun" & "To Know" in Swahili/Kingwana) is the first 100% offline Edge-AI foundation model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
 
-Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nuru**, **Wazo**, **Moto**, **Kuu**, **Mali**), **SautiLM Jua** is distilled and specialized from **Google Gemma 3 (`270M-IT`)** using LoRA Supervised Fine-Tuning (SFT) on **22,834 verified instructions** and compressed to **{size_mb} MB** in native `.litertlm` container format (`sautilm-jua.litertlm`), running smoothly on entry-level 2 GB - 4 GB RAM Android smartphones with zero internet connection and zero data cost.
+Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nuru**, **Wazo**, **Moto**, **Kuu**, **Mali**), **SautiLM Jua** is specialized from **Google Gemma 3 (`270M-IT`)** using masked-loss LoRA Supervised Fine-Tuning (SFT) on **{corpus_total:,} verified instructions** and compiled with Google's official `litert-torch` + `ai-edge-quantizer` (`{quant_recipe}`) into native `.litertlm` container format (`sautilm-jua.litertlm`, **{size_mb} MB**), executing natively on Android smartphones with zero internet connection.
 
 ---
 
-## SautiLM Foundation Series & 10 Specialized Domain Models
+## SautiLM Foundation Series & 10 Specialized Domain Modules
 
 ### Foundation Model Series (3-4 Letter Swahili / Kingwana Names)
-- **SautiLM Jua** (*Sun / Knowledge*) : Sub-100 MB Edge-AI foundation model (`{size_mb} MB`, Active)
-- **SautiLM Nuru** (*Light / Clarity*) : Mid-sized multimodal & reasoning model (In development)
+- **SautiLM Jua** (*Sun / Knowledge*) : Edge-AI foundation model (`{size_mb} MB`, Active - {verified_badge})
+- **SautiLM Nuru** (*Light / Clarity*) : Mid-sized multimodal & vision model (In development)
 - **SautiLM Wazo** (*Thought / Deep Reasoning*) : Analytical model for law, STEM, and research (In development)
 - **SautiLM Moto** (*Fire / High Speed*) : Ultra-low-latency streaming and voice model (In development)
 - **SautiLM Kuu** (*Supreme / Flagship*) : Full-scale institutional model for universities, courts, and hospitals (In development)
 - **SautiLM Mali** (*Heritage / Treasure*) : Sovereign linguistic and cultural corpus foundation (In development)
 
 ### 10 Specialized Domain Modules Powered by SautiLM Jua
-1. **SautiLM-Lex (Lexicography & Translation)** : Trained on **1,150 verified Bbadha (Kilendu) dictionary entries**, phonetics, grammatical classes, and trilingual examples (**Bbadha - Kiswahili - French/English**).
+1. **SautiLM-Lex (Lexicography & Translation)** : Grounded in **{lex_count:,} verified Bbadha (Kilendu) dictionary entries**, phonetics, grammatical classes, and trilingual examples (**Bbadha - Kiswahili - French/English**).
 2. **SautiLM-Edu (Education & General Sciences)** : Curriculum-aligned explanations in biology, physics, environmental science, and general knowledge.
 3. **SautiLM-Math (Mathematics & Quantitative Logic)** : Verified arithmetic, percentages, algebra, and commercial calculations.
 4. **SautiLM-Med (Public Health & Medical Triage)** : Actionable protocols for water sanitation (`Dda`), oral rehydration (ORS), cholera/malaria prevention (`Rra`), and nutrition (`Zzà`).
 5. **SautiLM-Ius (Congolese Law & Justice)** : Grounded in the **Constitution of the DRC**, the **revised Family Code (Loi n° 16/008)**, the **Penal Code**, the **Labor Code**, and **OHADA Law**.
-6. **SautiLM-Vision (Camera OCR & Visual Diagnostics)** : Offline optical character recognition for written exercises and visual plant/document analysis.
+6. **SautiLM-Vision (OCR Text & Symptom Analysis)** : Offline solving of transcribed chalkboard exercises and symptom-based crop diagnostics (direct image pixel encoding reserved for **SautiLM Nuru**).
 7. **SautiLM-Voice (Phonetics & Orality)** : Tonal pronunciation guidance and speech interface for Eastern DRC languages.
 8. **SautiLM-Agri (Agronomy & Crop Protection)** : Field diagnosis for cassava mosaic, maize rust, coffee wilt, composting, and soil conservation.
 9. **SautiLM-Fin (Finance, SME Accounting & AVEC)** : Cooperative accounting, village savings (VSLA/AVEC), and FC/USD trade calculations.
@@ -191,10 +208,12 @@ Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nu
 | :--- | :--- |
 | **Model Identifier** | `sautilm/SautiLM-Jua` |
 | **Primary Mobile Bundle** | `sautilm-jua.litertlm` ({size_mb} MB) |
-| **Parent Architecture** | Google Gemma 3 (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`) |
-| **Training Corpus** | 22,834 instructions (1,150 Bbadha words + Math + Edu + Med + Congolese Law + Vision) |
-| **Training Steps / Final Loss** | {steps} steps (LoRA `r=16, alpha=32`) / Loss: `{final_loss}` |
-| **Target Runtime** | Flutter (`flutter_edge_ai` + `flutter_edge_ai_litertlm` v1.19+) |
+| **Quantization / Export** | `litert-torch` (`{quant_recipe}`, TFLite FlatBuffer Prefill/Decode + HF Tokenizer) |
+| **Parent Architecture** | Google Gemma 3 (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`, `cache_length=2048`) |
+| **Training Corpus** | {corpus_total:,} instructions ({lex_count:,} Bbadha lexicon entries + Math + Edu + Med + Congolese Law + OCR/Text Vision) |
+| **Training Steps / Final Loss** | {steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`, response-only loss masking) / Final Loss: `{final_loss}` |
+| **Runtime Verification** | {verified_badge} |
+| **Target Mobile Runtime** | Flutter (`flutter_edge_ai` + `flutter_edge_ai_litertlm`) |
 | **Minimum Hardware** | Android 8.0+ (API 26+), 2 GB RAM, ARM Cortex-A53/A55 CPU or Mobile GPU |
 
 ---
@@ -245,21 +264,29 @@ def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
     )
 
     if include_outputs and OUTPUT_DIR.exists():
-        litertlm_file = OUTPUT_DIR / "sautilm-v1.litertlm"
-        if litertlm_file.exists():
-            print(f"[SautiLM-Forge] Uploading {litertlm_file.name} to {repo_id}...")
-            hf_api.upload_file(
-                path_or_fileobj=str(litertlm_file),
-                path_in_repo="sautilm-jua.litertlm",
-                repo_id=repo_id,
-                repo_type="model",
+        if not (metrics and metrics.get("litertlm_verified")):
+            raise RuntimeError(
+                "Refusing to upload unverified .litertlm artifacts to Hugging Face! "
+                "Ensure training_metrics.json confirms litertlm_verified=True."
             )
-            hf_api.upload_file(
-                path_or_fileobj=str(litertlm_file),
-                path_in_repo="sautilm-v1.litertlm",
-                repo_id=repo_id,
-                repo_type="model",
-            )
+        litertlm_file = OUTPUT_DIR / "sautilm-jua.litertlm"
+        if not litertlm_file.exists():
+            litertlm_file = OUTPUT_DIR / "sautilm-v1.litertlm"
+        if not litertlm_file.exists():
+            raise FileNotFoundError(f"No verified .litertlm bundle found in {OUTPUT_DIR}")
+        print(f"[SautiLM-Forge] Uploading verified {litertlm_file.name} to {repo_id}...")
+        hf_api.upload_file(
+            path_or_fileobj=str(litertlm_file),
+            path_in_repo="sautilm-jua.litertlm",
+            repo_id=repo_id,
+            repo_type="model",
+        )
+        hf_api.upload_file(
+            path_or_fileobj=str(litertlm_file),
+            path_in_repo="sautilm-v1.litertlm",
+            repo_id=repo_id,
+            repo_type="model",
+        )
         if metrics_file.exists():
             hf_api.upload_file(
                 path_or_fileobj=str(metrics_file),
@@ -297,7 +324,17 @@ def check_or_download_kaggle_kernel(kernel_ref: str) -> Dict[str, Any]:
     }
     if "complete" in status_str.lower():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        api.kernels_output(kernel_ref, path=str(OUTPUT_DIR), quiet=False)
+        # Clear stale prior artifacts before downloading fresh run outputs
+        for old_name in ("sautilm-v1.litertlm", "sautilm-jua.litertlm", "training_metrics.json"):
+            old_path = OUTPUT_DIR / old_name
+            if old_path.exists():
+                old_path.unlink()
+        api.kernels_output(
+            kernel_ref,
+            path=str(OUTPUT_DIR),
+            file_pattern=r"^(sautilm-jua\.litertlm|sautilm-v1\.litertlm|training_metrics\.json|sautilm_v1_lora_adapter/.*)$",
+            quiet=False,
+        )
         result["downloaded_to"] = str(OUTPUT_DIR)
     return result
 
@@ -307,16 +344,16 @@ if __name__ == "__main__":
 
     cmd = sys.argv[1] if len(sys.argv) > 1 else "launch"
     if cmd == "launch":
-        ds_ref = publish_dataset_to_kaggle()
-        print("Waiting 12s for Kaggle dataset indexing...")
-        time.sleep(12)
+        ds_ref = publish_dataset_to_kaggle(skip_if_exists=False)
+        print("Waiting 15s for Kaggle dataset indexing...")
+        time.sleep(15)
         k_ref = push_gpu_kernel_to_kaggle(ds_ref)
-        hf_url = init_and_upload_hf_repo(include_outputs=False)
-        print(json.dumps({"dataset": ds_ref, "kernel": k_ref, "hf_url": hf_url}, indent=2))
+        print(json.dumps({"dataset": ds_ref, "kernel": k_ref}, indent=2))
     elif cmd == "status":
         auth = _load_local_auth()
         k_ref = f"{auth['kaggle_user']}/sautilm-v1-forge-gpu"
         info = check_or_download_kaggle_kernel(k_ref)
         print(json.dumps(info, indent=2))
-        if "complete" in info["status"].lower():
-            init_and_upload_hf_repo(include_outputs=True)
+    elif cmd == "upload":
+        hf_url = init_and_upload_hf_repo(include_outputs=True)
+        print(json.dumps({"hf_url": hf_url}, indent=2))

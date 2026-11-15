@@ -13,7 +13,7 @@ It powers the **SautiLM** family of offline mobile language models engineered fo
 ## 1. SautiLM Foundation Series & 10 Specialized Domain Models
 
 ### Foundation Model Series (3-4 Letter Swahili / Kingwana Names)
-- **`SautiLM Jua`** (*Sun / Knowledge*) : Sub-100 MB Edge-AI foundation model (`92.48 MB`, Active on Hugging Face)
+- **`SautiLM Jua`** (*Sun / Knowledge*) : Compact Edge-AI foundation model (`272.36 MB` INT8 LiteRT-LM, Active on Hugging Face)
 - **`SautiLM Nuru`** (*Light / Clarity*) : Mid-sized multimodal & reasoning model (In development)
 - **`SautiLM Wazo`** (*Thought / Deep Reasoning*) : Analytical model for law, STEM, and research (In development)
 - **`SautiLM Moto`** (*Fire / High Speed*) : Ultra-low-latency streaming and voice model (In development)
@@ -41,23 +41,23 @@ It powers the **SautiLM** family of offline mobile language models engineered fo
 ```text
 SautiLM-Forge/
 ├── src/
-│   ├── corpus_builder.py        # Extracts verified linguistic JSONs & generates 22,834 SFT instructions
-│   ├── litertlm_packager.py     # Builds & validates .litertlm v1.5.0 FlatBuffer mobile containers
+│   ├── corpus_builder.py        # Extracts verified linguistic JSONs & generates 22,857 SFT instructions
+│   ├── litertlm_packager.py     # Validates .litertlm FlatBuffer mobile containers
 │   └── kaggle_orchestrator.py   # Hybrid orchestrator: Local PC -> Remote Kaggle T4 GPU -> Hugging Face Hub
 ├── kaggle_kernel/
-│   └── train_and_export.py      # Remote GPU LoRA fine-tuning (r=16, alpha=32) & <= 150 MB compression
+│   └── train_and_export.py      # Remote GPU LoRA fine-tuning (r=32, alpha=64) & litert-torch INT8 export
 ├── data/
-│   ├── corpus_stats.json        # Verified statistics of the 22,834-instruction corpus
+│   ├── corpus_stats.json        # Verified statistics of the 22,857-instruction corpus
 │   └── sample_train_schema.jsonl# Public schema sample (5 example instructions across domains)
 ├── kaggle_output/
-│   └── training_metrics.json    # Empirical Tesla T4 GPU convergence metrics (189 steps, Loss: 5.73 -> 0.48)
+│   └── training_metrics.json    # Empirical Tesla T4 GPU metrics (525 steps, Loss: 4.16 -> 0.35, 8/8 checks)
 ├── docs/
 │   ├── specs/                   # Architectural specifications
 │   └── plans/                   # Implementation plans
 └── tests/                       # Unit test suite for corpus generation and .litertlm binary validation
 ```
 
-> **Data Sovereignty & IP Protection Note**: To protect community linguistic assets and prevent unauthorized scraping, the full 1,150-word Bbadha JSON dictionary and the 69 MB `sautilm_v1_train.jsonl` corpus are excluded from public Git tracking via `.gitignore`. Only `data/sample_train_schema.jsonl` and `data/corpus_stats.json` are versioned publicly.
+> **Data Sovereignty & IP Protection Note**: To protect community linguistic assets and prevent unauthorized scraping, the full 1,150-word Bbadha JSON dictionary and the 35 MB `sautilm_v1_train.jsonl` corpus are excluded from public Git tracking via `.gitignore`. Only `data/sample_train_schema.jsonl` and `data/corpus_stats.json` are versioned publicly.
 
 ---
 

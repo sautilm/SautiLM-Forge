@@ -1,10 +1,16 @@
 """
-SautiLM-v1 Remote GPU Training, Distillation & Sub-150MB LiteRT-LM Export Script.
-Runs on Kaggle NVIDIA Tesla T4 GPU without any embedded credentials.
+SautiLM Jua Remote GPU Training, Masked LoRA SFT, Official LiteRT-Torch Conversion
+& LiteRT-LM Runtime Verification Script.
+
+Runs on Kaggle NVIDIA Tesla T4 GPU (or local GPU/CPU) without embedded credentials.
 Base model: unsloth/gemma-3-270m-it (Google Gemma 3 270M IT architecture).
 """
 
+from __future__ import annotations
+
+import gc
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -13,119 +19,445 @@ import struct
 import subprocess
 import sys
 import time
-
-# ============================================================================
-# 1. LITERT-LM v1.5.0 CONTAINER BUILDER (Self-contained)
-# ============================================================================
-LITERTLM_HEADER_368_HEX = (
-    "4c49544552544c4d010000000500000000000000000000007001000000000000"
-    "0c00000008000c00080004000800000008000000ec000000eafeffff04000000"
-    "03000000bc00000088000000040000005cffffff00000003f0cef31000000000"
-    "004048000000000004000000010000001000000000000a0010000c000b000400"
-    "0a0000000c000000000000092800000042ffffff040000001600000074665f6c"
-    "6974655f70726566696c6c5f6465636f646500000a0000006d6f64656c5f7479"
-    "706500000c0020001c001000080007000c00000000000004f80c480000000000"
-    "00800000000000000000000004000000000000000c001c001800100008000700"
-    "0c000000000000053c4000000000000000400000000000000400000000000000"
-    "d2ffffff04000000010000001000000000000a0012000c000b0004000a000000"
-    "14000000000000091c0000000000060008000400060000000400000000000000"
-    "0000000007000000417574686f727300"
-)
-
-DEFAULT_LLM_METADATA_PROTO_HEX = (
-    "0a050a030a0102120f120d3c656e645f6f665f7475726e3e"
-    "121b12193c73746172745f66756e6374696f6e5f726573706f6e73653e28800832021a00"
-)
+from typing import Any, Dict, List
 
 
-def _align_16k(offset: int) -> int:
-    return (offset + 16383) & ~16383
+CORE_BBADHA_WORDS = {
+    "ddà",
+    "'ábba",
+    "'ádzá",
+    "bba",
+    "dyà",
+    "rra",
+    "chà",
+    "zzà",
+    "ddi",
+    "dyi",
+    "ke",
+    "dja",
+    "kpa",
+    "ma",
+    "ni",
+}
 
 
-def build_litertlm_bundle(
-    output_path: Path,
-    sp_tokenizer_bytes: bytes,
-    tflite_model_bytes: bytes,
-) -> int:
-    llm_metadata_proto_bytes = bytes.fromhex(DEFAULT_LLM_METADATA_PROTO_HEX)
-    header_buf = bytearray(bytes.fromhex(LITERTLM_HEADER_368_HEX))
-
-    sec0_begin = 16384
-    sec0_end = sec0_begin + len(llm_metadata_proto_bytes)
-    sec1_begin = 32768
-    sec1_end = sec1_begin + len(sp_tokenizer_bytes)
-    sec2_begin = _align_16k(sec1_end)
-    sec2_end = sec2_begin + len(tflite_model_bytes)
-
-    struct.pack_into("<Q", header_buf, 264, sec0_end)
-    struct.pack_into("<Q", header_buf, 272, sec0_begin)
-    struct.pack_into("<Q", header_buf, 216, sec1_end)
-    struct.pack_into("<Q", header_buf, 224, sec1_begin)
-    struct.pack_into("<Q", header_buf, 88, sec2_end)
-    struct.pack_into("<Q", header_buf, 96, sec2_begin)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "wb") as f:
-        f.write(header_buf)
-        f.write(b"\x00" * (sec0_begin - len(header_buf)))
-        f.write(llm_metadata_proto_bytes)
-        f.write(b"\x00" * (sec1_begin - sec0_end))
-        f.write(sp_tokenizer_bytes)
-        f.write(b"\x00" * (sec2_begin - sec1_end))
-        f.write(tflite_model_bytes)
-
-    return output_path.stat().st_size
-
-
-# ============================================================================
-# 2. DATASET CURATION & BALANCING
-# ============================================================================
-def load_and_balance_dataset(input_root: Path):
+def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
+    """Loads sautilm_v1_train.jsonl, prioritizes key Bbadha + specialty domains, and balances rows."""
     jsonl_files = list(input_root.rglob("sautilm_v1_train.jsonl"))
     if not jsonl_files:
         raise FileNotFoundError(f"Could not find sautilm_v1_train.jsonl in {input_root}")
     jsonl_path = jsonl_files[0]
     print(f"[SautiLM-Forge] Found training corpus: {jsonl_path}")
 
-    by_domain = {}
+    by_domain: Dict[str, List[Dict[str, Any]]] = {}
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue
-            # Clean any legacy advisor mentions from system prompt / identity rows
-            cleaned_line = (
-                line.replace(
-                    "Georges Byona, Abraham Imani, Jacques Uwonda, Dr Philippe Lokpari, and Ir Jean de Dieu Losinu",
-                    "Georges Byona, Abraham Imani, and Jacques Uwonda",
-                )
-                .replace("4. **Dr Philippe Lokpari** - Expert Linguiste en langues africaines (ISP Bunia)\\n", "")
-                .replace("5. **Ir Jean de Dieu Losinu** - Consultant Stratégique et Humanitaire\\n", "")
-                .replace("4. **Dr Philippe Lokpari** - Mtaalamu wa Isimu na Lugha za Kiafrika (ISP Bunia)\\n", "")
-                .replace("5. **Ir Jean de Dieu Losinu** - Mshauri wa Kimkakati na Kibinadamu\\n", "")
-            )
-            row = json.loads(cleaned_line)
+            row = json.loads(line)
             d = row.get("domain", "lex")
             by_domain.setdefault(d, []).append(row)
 
     random.seed(42)
-    curated = []
-    # Include all high-priority non-lex domains (identity, math, edu, med, ius, vision)
+    curated: List[Dict[str, Any]] = []
+
+    # Balanced oversampling of core reasoning, identity, law, health, vision, and math
     for d, items in by_domain.items():
         if d != "lex":
-            curated.extend(items * 3)  # Oversample core specialty domains
+            curated.extend(items * 3)
+
+    # For lex: prioritize RAG-grounded entries, natural Q&As, and exact core Bbadha headword cards
+    lex_items = by_domain.get("lex", [])
+    rag_or_dda_lex: List[Dict[str, Any]] = []
+    core_headword_lex: List[Dict[str, Any]] = []
+    other_lex: List[Dict[str, Any]] = []
+    for item in lex_items:
+        sys_lower = str(item.get("system", "")).lower()
+        prompt_lower = str(item.get("prompt", "")).lower()
+        resp_lower = str(item.get("response", "")).lower()
+        is_rag = "dictionnaire bbadha verifie" in sys_lower
+        is_dda_qa = ("dda" in prompt_lower or "ddà" in prompt_lower) and (
+            "**ddà**" in resp_lower or "ddà" in resp_lower
+        )
+        is_core_headword = any(f"**{w}**" in resp_lower for w in CORE_BBADHA_WORDS)
+        if is_rag or is_dda_qa:
+            rag_or_dda_lex.append(item)
+        elif is_core_headword:
+            core_headword_lex.append(item)
         else:
-            # Sample 2,200 diverse Bbadha lexical & sentence translations covering all letters
-            sampled_lex = items if len(items) <= 2200 else random.sample(items, 2200)
-            curated.extend(sampled_lex)
+            other_lex.append(item)
+
+    if len(core_headword_lex) > 500:
+        core_headword_lex = random.sample(core_headword_lex, 500)
+    curated.extend(rag_or_dda_lex * 2)
+    curated.extend(core_headword_lex)
+    target_other = max(400, 2800 - len(curated))
+    sampled_other = other_lex if len(other_lex) <= target_other else random.sample(other_lex, target_other)
+    curated.extend(sampled_other)
 
     random.shuffle(curated)
-    print(f"[SautiLM-Forge] Balanced training set size: {len(curated)} examples")
+    print(
+        f"[SautiLM-Forge] Curated dataset: {len(curated)} rows "
+        f"(rag_dda={len(rag_or_dda_lex)}x2, core_headword={len(core_headword_lex)}, "
+        f"sampled_other_lex={len(sampled_other)})"
+    )
     return curated
 
 
-# ============================================================================
-# 3. MAIN GPU FINE-TUNING & SUB-150MB EXPORT PIPELINE
-# ============================================================================
+def prepare_masked_example(tokenizer, row: Dict[str, Any], max_len: int) -> Dict[str, List[int]] | None:
+    """
+    Tokenizes a conversation using Gemma 3 chat_template and masks prompt tokens (-100)
+    so training loss is computed strictly on assistant response tokens through <end_of_turn>.
+    """
+    messages = row.get("messages")
+    if not messages or len(messages) < 2:
+        return None
+
+    # Handle chat templates that either accept role='system' directly or merge system into user
+    prompt_messages = messages[:-1]
+    try:
+        prompt_str = tokenizer.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True)
+        full_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    except Exception:
+        # Manual Gemma 3 fallback matching chat_template.jinja
+        sys_txt = row.get("system") or ""
+        user_txt = row.get("prompt") or ""
+        asst_txt = row.get("response") or ""
+        user_block = f"{sys_txt}\n\n{user_txt}".strip() if sys_txt else user_txt
+        bos = tokenizer.bos_token or "<bos>"
+        prompt_str = f"{bos}<start_of_turn>user\n{user_block}<end_of_turn>\n<start_of_turn>model\n"
+        full_str = f"{prompt_str}{asst_txt}<end_of_turn>\n"
+
+    prompt_ids = tokenizer(prompt_str, add_special_tokens=False)["input_ids"]
+    full_ids = tokenizer(full_str, add_special_tokens=False, truncation=True, max_length=max_len)["input_ids"]
+
+    # Find exact common prefix in case tokenizer merges across turn boundary
+    prefix_len = 0
+    limit = min(len(prompt_ids), len(full_ids))
+    while prefix_len < limit and prompt_ids[prefix_len] == full_ids[prefix_len]:
+        prefix_len += 1
+
+    # Need at least 8 supervised answer tokens
+    if len(full_ids) - prefix_len < 8:
+        return None
+
+    labels = [-100] * prefix_len + full_ids[prefix_len:]
+    return {"input_ids": full_ids, "labels": labels}
+
+
+def collate_padded_batch(batch: List[Dict[str, List[int]]], pad_token_id: int, device) -> Dict[str, Any]:
+    """Dynamic batch padding up to longest sequence in batch."""
+    import torch
+
+    max_batch_len = max(len(x["input_ids"]) for x in batch)
+    input_ids_list = []
+    attn_mask_list = []
+    labels_list = []
+    for item in batch:
+        ids = item["input_ids"]
+        lbls = item["labels"]
+        pad_len = max_batch_len - len(ids)
+        input_ids_list.append(ids + [pad_token_id] * pad_len)
+        attn_mask_list.append([1] * len(ids) + [0] * pad_len)
+        labels_list.append(lbls + [-100] * pad_len)
+
+    return {
+        "input_ids": torch.tensor(input_ids_list, dtype=torch.long, device=device),
+        "attention_mask": torch.tensor(attn_mask_list, dtype=torch.long, device=device),
+        "labels": torch.tensor(labels_list, dtype=torch.long, device=device),
+    }
+
+
+def ensure_export_assets(merged_dir: Path, base_model_id: str) -> None:
+    """Ensures tokenizer.model, chat_template.jinja, and generation_config.json exist for litert-torch."""
+    from huggingface_hub import hf_hub_download
+
+    for filename in ("tokenizer.model", "chat_template.jinja", "generation_config.json"):
+        target = merged_dir / filename
+        if not target.exists():
+            try:
+                cached = hf_hub_download(repo_id=base_model_id, filename=filename)
+                shutil.copy2(cached, target)
+                print(f"[SautiLM-Forge] Copied {filename} into {merged_dir}")
+            except Exception as err:
+                print(f"[SautiLM-Forge] Warning copying {filename}: {err}")
+
+
+def verify_tflite_flatbuffers_inside_litertlm(litertlm_path: Path) -> Dict[str, Any]:
+    """Verifies header integrity and validates real TFLite FlatBuffer ('TFL3') signatures inside .litertlm."""
+    import io
+    from litert_lm_builder import (
+        litertlm_header_schema_py_generated as schema,
+        litertlm_peek,
+    )
+
+    out_stream = io.StringIO()
+    metadata = litertlm_peek.read_litertlm_header(str(litertlm_path), out_stream)
+    dtype_to_name = {
+        getattr(schema.AnySectionDataType, attr): attr
+        for attr in dir(schema.AnySectionDataType)
+        if not attr.startswith("_")
+        and isinstance(getattr(schema.AnySectionDataType, attr), int)
+    }
+
+    sections_info = []
+    has_tflite_prefill_decode = False
+    has_sp_tokenizer = False
+    has_llm_metadata = False
+    has_valid_tfl3_payload = False
+
+    with open(litertlm_path, "rb") as f:
+        sec_meta = metadata.SectionMetadata()
+        for i in range(sec_meta.ObjectsLength()):
+            sec = sec_meta.Objects(i)
+            dtype_id = sec.DataType()
+            dtype_name = dtype_to_name.get(dtype_id, f"UNKNOWN_{dtype_id}")
+            begin = sec.BeginOffset()
+            end = sec.EndOffset()
+            size = end - begin
+            sections_info.append({"type": dtype_name, "begin": begin, "end": end, "size": size})
+            if dtype_id in (
+                schema.AnySectionDataType.SP_Tokenizer,
+                schema.AnySectionDataType.HF_Tokenizer_Zlib,
+            ) and size > 10000:
+                has_sp_tokenizer = True
+            if dtype_id == schema.AnySectionDataType.LlmMetadataProto and size > 0:
+                has_llm_metadata = True
+            if dtype_id == schema.AnySectionDataType.TFLiteModel and size > 1000000:
+                has_tflite_prefill_decode = True
+                f.seek(begin)
+                head = f.read(16)
+                if len(head) >= 8 and head[4:8] == b"TFL3":
+                    has_valid_tfl3_payload = True
+
+    if not (has_tflite_prefill_decode and has_sp_tokenizer and has_valid_tfl3_payload):
+        raise RuntimeError(
+            f"Exported .litertlm failed binary FlatBuffer verification! sections={sections_info}"
+        )
+
+    return {
+        "valid_tfl3": has_valid_tfl3_payload,
+        "has_sp_tokenizer": has_sp_tokenizer,
+        "has_llm_metadata": has_llm_metadata,
+        "sections": sections_info,
+        "peek_excerpt": out_stream.getvalue()[:1200],
+    }
+
+
+def _shim_litert_lm_builder_compat() -> None:
+    """Bridges litert-torch 0.10.0 expecting litert_lm_builder.TfLiteModelType on 0.19.2."""
+    import litert_lm_builder
+    from litert_lm_builder.runtime.proto import llm_metadata_pb2
+
+    if not hasattr(litert_lm_builder, "TfLiteModelType"):
+        class _TfLiteModelTypeCompat:
+            PREFILL_DECODE = llm_metadata_pb2.LlmMetadata.TF_LITE_PREFILL_DECODE
+            EMBEDDER = llm_metadata_pb2.LlmMetadata.TF_LITE_EMBEDDER
+            VISION_ENCODER = llm_metadata_pb2.LlmMetadata.TF_LITE_VISION_ENCODER
+            VISION_ADAPTER = llm_metadata_pb2.LlmMetadata.TF_LITE_VISION_ADAPTER
+            END_OF_VISION = llm_metadata_pb2.LlmMetadata.TF_LITE_END_OF_VISION
+            AUDIO_ENCODER_HW = llm_metadata_pb2.LlmMetadata.TF_LITE_AUDIO_ENCODER_HW
+            AUDIO_ADAPTER = llm_metadata_pb2.LlmMetadata.TF_LITE_AUDIO_ADAPTER
+            END_OF_AUDIO = llm_metadata_pb2.LlmMetadata.TF_LITE_END_OF_AUDIO
+            AUX = llm_metadata_pb2.LlmMetadata.TF_LITE_AUX
+            PER_LAYER_EMBEDDER = llm_metadata_pb2.LlmMetadata.TF_LITE_PER_LAYER_EMBEDDER
+
+        litert_lm_builder.TfLiteModelType = _TfLiteModelTypeCompat
+
+
+def _score_runtime_outputs(outputs: Dict[str, str]) -> int:
+    """Scores grounded factual accuracy & hallucination resistance across 8 domain checks (max 8)."""
+    score = 0
+    checks = {
+        "identity_fr": lambda t: ("sautilm" in t or "losingtek" in t) and "rossi" not in t and "nuru ai research" not in t,
+        "identity_en": lambda t: ("sautilm" in t or "losingtek" in t) and "openai" not in t,
+        "identity_georges": lambda t: "georges byona" in t and "losingtek" in t and "nuru ai" not in t and "edge-bert" not in t,
+        "lex_dda": lambda t: ("eau" in t or "maji" in t or "rivi" in t or "water" in t) and "grosse" not in t and ": (1)" not in t,
+        "lex_rag_dda": lambda t: ("eau" in t or "maji" in t or "rivi" in t) and "chien" not in t and "(19)" not in t,
+        "ius_garde_a_vue": lambda t: ("48" in t and ("constitution" in t or "avocat" in t or "art" in t)) and "vlan" not in t and "360" not in t,
+        "math_pastoral": lambda t: ("15" in t),
+        "med_cholera": lambda t: ("bouillir" in t or "filtr" in t or "chlore" in t or "savon" in t),
+    }
+    for k, fn in checks.items():
+        txt = (outputs.get(k) or "").lower()
+        words = txt.split()
+        unique_ratio = (len(set(words)) / len(words)) if words else 0.0
+        if len(words) >= 5 and unique_ratio >= 0.30 and fn(txt):
+            score += 1
+    return score
+
+
+def run_litert_lm_runtime_checks(litertlm_path: Path) -> Dict[str, str]:
+    """Loads the exported .litertlm in Google's real litert_lm Engine and generates responses."""
+    import litert_lm
+
+    test_cases = [
+        ("identity_fr", None, "Qui es-tu et qui t'a créé ?"),
+        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?"),
+        ("identity_georges", None, "Qui est Georges Byona ?"),
+        ("lex_dda", None, "Que signifie le mot Bbadha Dda ?"),
+        (
+            "lex_rag_dda",
+            "Tu es SautiLM-Lex, assistant lexicographique hors-ligne de SautiLM. Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
+            "DICTIONNAIRE BBADHA VERIFIE: Mot: ddà | Grammaire: Terme lexical | Kiswahili: maji, kuwa refu | Francais: l'eau, la rivière, -loin.",
+            "Que signifie le mot Bbadha ddà ?",
+        ),
+        (
+            "ius_garde_a_vue",
+            "Tu es SautiLM-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
+            "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?",
+        ),
+        (
+            "math_pastoral",
+            None,
+            "Un éleveur en Ituri possède 12 vaches (Dyà). Il en achète 8 de plus, puis en vend 5 au marché. Combien lui en reste-t-il ?",
+        ),
+        (
+            "med_cholera",
+            "Tu es SautiLM-Med, assistant de santé communautaire hors-ligne. Réponds clairement en français.",
+            "Quelles sont les 3 étapes essentielles pour purifier l'eau (Dda) et prévenir le choléra (Rra) ?",
+        ),
+    ]
+
+    outputs: Dict[str, str] = {}
+    with litert_lm.Engine(str(litertlm_path), backend=litert_lm.Backend.CPU()) as engine:
+        for key, sys_prompt, user_prompt in test_cases:
+            init_messages = (
+                [{"role": "system", "content": [{"type": "text", "text": sys_prompt}]}]
+                if sys_prompt
+                else None
+            )
+            sampler = litert_lm.SamplerConfig(top_k=40, top_p=0.95, temperature=0.2, seed=42)
+            with engine.create_conversation(
+                messages=init_messages,
+                sampler_config=sampler,
+                max_output_tokens=256,
+            ) as conv:
+                reply = "".join(str(chunk) for chunk in conv.send_message_async(user_prompt)).strip()
+            outputs[key] = reply
+            print(f"\n[LiteRT-LM LIVE CHECK: {key}]\nPrompt: {user_prompt}\nOutput: {reply[:400]}...")
+            if not reply:
+                raise RuntimeError(f"LiteRT-LM produced empty response for test case: {key}")
+
+    return outputs
+
+
+def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: str) -> Dict[str, Any]:
+    """Installs official litert-torch + litert-lm after GPU training, exports, benchmarks, and verifies .litertlm."""
+    print("=== [SautiLM-Forge] Step 5: Installing Official Google litert-torch & litert-lm ===")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "--upgrade-strategy",
+            "only-if-needed",
+            "litert-torch==0.10.0",
+            "litert-lm==0.19.2",
+        ],
+        check=True,
+    )
+
+    ensure_export_assets(merged_dir, base_model_id)
+    _shim_litert_lm_builder_compat()
+
+    from litert_torch.generative.export_hf import export as litert_export
+
+    # Empirical Run 3 benchmark on 270M proved dynamic_wi4b32_afp32 collapses (0/6) while dynamic_wi8_afp32 preserves reasoning.
+    recipes_to_eval = ["dynamic_wi8_afp32"]
+    export_out_dir = work_dir / "litert_export_tmp"
+    final_litertlm = work_dir / "sautilm-jua.litertlm"
+    candidates: List[Dict[str, Any]] = []
+
+    try:
+        for recipe in recipes_to_eval:
+            if export_out_dir.exists():
+                shutil.rmtree(export_out_dir)
+            export_out_dir.mkdir(parents=True, exist_ok=True)
+            candidate_file = work_dir / f"candidate_{recipe}.litertlm"
+            print(f"=== [SautiLM-Forge] Exporting merged Gemma3 model with recipe='{recipe}' ===")
+            try:
+                litert_export.export(
+                    model=str(merged_dir),
+                    output_dir=str(export_out_dir),
+                    task="text_generation",
+                    prefill_lengths=[128],
+                    cache_length=2048,
+                    quantization_recipe=recipe,
+                    externalize_embedder=False,
+                    use_jinja_template=True,
+                    bundle_litert_lm=True,
+                    keep_temporary_files=False,
+                )
+                generated_files = list(export_out_dir.glob("*.litertlm"))
+                if not generated_files:
+                    raise FileNotFoundError(f"No .litertlm output produced in {export_out_dir}")
+                shutil.copy2(generated_files[0], candidate_file)
+
+                binary_check = verify_tflite_flatbuffers_inside_litertlm(candidate_file)
+                runtime_outputs = run_litert_lm_runtime_checks(candidate_file)
+                score = _score_runtime_outputs(runtime_outputs)
+                c_bytes = candidate_file.stat().st_size
+                c_mb = round(c_bytes / (1024 * 1024), 2)
+                print(
+                    f"[SautiLM-Forge] Candidate '{recipe}': {c_mb} MB | Accuracy Score: {score}/8"
+                )
+                candidates.append(
+                    {
+                        "recipe": recipe,
+                        "path": candidate_file,
+                        "size_bytes": c_bytes,
+                        "size_mb": c_mb,
+                        "quality_score": score,
+                        "binary_check": binary_check,
+                        "runtime_outputs": runtime_outputs,
+                    }
+                )
+            except Exception as err:
+                print(f"[SautiLM-Forge] Candidate recipe '{recipe}' failed: {err}")
+
+        if not candidates:
+            raise RuntimeError("All LiteRT-LM export recipes failed!")
+
+        # Select highest-scoring candidate (tie-break: smaller mobile bundle wins!)
+        candidates.sort(key=lambda c: (-c["quality_score"], c["size_bytes"]))
+        winner = candidates[0]
+        shutil.copy2(winner["path"], final_litertlm)
+    finally:
+        shutil.rmtree(export_out_dir, ignore_errors=True)
+        shutil.rmtree(merged_dir, ignore_errors=True)
+        for p in work_dir.glob("candidate_*.litertlm"):
+            p.unlink(missing_ok=True)
+
+    size_bytes = final_litertlm.stat().st_size
+    size_mb = round(size_bytes / (1024 * 1024), 2)
+    print(
+        f"[SautiLM-Forge] Selected '{winner['recipe']}' -> {final_litertlm.name}: "
+        f"{size_mb} MB ({size_bytes} bytes) | Score={winner['quality_score']}/8"
+    )
+
+    return {
+        "litertlm_filename": final_litertlm.name,
+        "litertlm_size_bytes": size_bytes,
+        "litertlm_size_mb": size_mb,
+        "quantization_recipe": winner["recipe"],
+        "litertlm_quality_score": f"{winner['quality_score']}/8",
+        "litertlm_binary_check": winner["binary_check"],
+        "litertlm_runtime_test_outputs": winner["runtime_outputs"],
+        "candidates_evaluated": [
+            {
+                "recipe": c["recipe"],
+                "size_mb": c["size_mb"],
+                "quality_score": f"{c['quality_score']}/8",
+            }
+            for c in candidates
+        ],
+        "litertlm_verified": True,
+    }
+
+
 def main():
     start_time = time.time()
     work_dir = Path("/kaggle/working") if Path("/kaggle/working").exists() else Path("./work_output")
@@ -135,15 +467,21 @@ def main():
     print("=== [SautiLM-Forge] Step 1: Checking GPU & Environment ===")
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    import peft.import_utils
-    import peft.tuners.lora.torchao
-    peft.import_utils.is_torchao_available = lambda: False
-    peft.tuners.lora.torchao.is_torchao_available = lambda: False
+
+    try:
+        import peft.import_utils
+        import peft.tuners.lora.torchao
+
+        peft.import_utils.is_torchao_available = lambda: False
+        peft.tuners.lora.torchao.is_torchao_available = lambda: False
+    except Exception:
+        pass
     from peft import LoraConfig, get_peft_model
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device} | Torch: {torch.__version__}")
-    if device == "cuda":
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
+    print(f"Device: {device_str} | Torch: {torch.__version__}")
+    if device_str == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     curated_data = load_and_balance_dataset(input_dir)
@@ -154,16 +492,26 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    dtype = torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float16
+    max_len = 640
+    encoded_examples: List[Dict[str, List[int]]] = []
+    for row in curated_data:
+        ex = prepare_masked_example(tokenizer, row, max_len=max_len)
+        if ex is not None:
+            encoded_examples.append(ex)
+    print(f"[SautiLM-Forge] Prepared {len(encoded_examples)} masked-loss examples (max_len={max_len})")
+
+    # Float32 on T4 (only ~1.08GB weights) ensures zero fp16 RMSNorm/logit overflow prior to LiteRT export
     model = AutoModelForCausalLM.from_pretrained(
         base_model_id,
-        torch_dtype=dtype if device == "cuda" else torch.float32,
-        device_map="auto" if device == "cuda" else None,
+        dtype=torch.float32,
+        device_map={"": 0} if device_str == "cuda" else None,
     )
 
+    lora_r = 32
+    lora_alpha = 64
     peft_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
+        r=lora_r,
+        lora_alpha=lora_alpha,
         lora_dropout=0.05,
         bias="none",
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
@@ -172,155 +520,97 @@ def main():
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    print("=== [SautiLM-Forge] Step 3: Fine-Tuning on SautiLM Trilingual + Math + Law Corpus ===")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
+    print("=== [SautiLM-Forge] Step 3: Masked Multi-Epoch LoRA Fine-Tuning ===")
+    batch_size = 2 if device_str == "cuda" else 1
+    grad_accum = 8 if device_str == "cuda" else 1
+    effective_bs = batch_size * grad_accum
+    num_epochs = 3 if device_str == "cuda" else 1
+    total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
+    if device_str != "cuda":
+        total_steps = min(total_steps, 8)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2.5e-4, weight_decay=0.01)
+
+    def lr_lambda(step_idx: int) -> float:
+        warmup = max(10, int(0.08 * total_steps))
+        if step_idx < warmup:
+            return float(step_idx + 1) / float(warmup)
+        progress = float(step_idx - warmup) / float(max(1, total_steps - warmup))
+        return max(0.1, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     model.train()
 
-    batch_size = 4 if device == "cuda" else 1
-    grad_accum = 4
-    max_steps = 240 if device == "cuda" else 10
-    max_len = 320
-
-    losses = []
+    losses: List[float] = []
     step = 0
+    micro_step = 0
+    accum_loss = 0.0
     optimizer.zero_grad()
 
-    for idx in range(0, len(curated_data), batch_size):
-        if step >= max_steps:
-            break
-        batch_rows = curated_data[idx : idx + batch_size]
-        texts = [r["text"] for r in batch_rows]
-        enc = tokenizer(
-            texts,
-            truncation=True,
-            max_length=max_len,
-            padding=True,
-            return_tensors="pt",
-        ).to(model.device)
+    for epoch in range(num_epochs):
+        random.Random(42 + epoch).shuffle(encoded_examples)
+        for idx in range(0, len(encoded_examples), batch_size):
+            if step >= total_steps:
+                break
+            batch_items = encoded_examples[idx : idx + batch_size]
+            batch = collate_padded_batch(batch_items, tokenizer.pad_token_id, device)
+            outputs = model(**batch)
+            loss = outputs.loss / grad_accum
+            loss.backward()
+            accum_loss += float(loss.item())
+            micro_step += 1
 
-        labels = enc["input_ids"].clone()
-        labels[enc["attention_mask"] == 0] = -100
+            if micro_step % grad_accum == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                step += 1
+                val_loss = accum_loss
+                accum_loss = 0.0
+                losses.append(val_loss)
+                if step % 20 == 0 or step == 1 or step == total_steps:
+                    print(
+                        f"Epoch {epoch + 1}/{num_epochs} | Step {step}/{total_steps} | "
+                        f"Loss: {val_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}"
+                    )
 
-        outputs = model(
-            input_ids=enc["input_ids"],
-            attention_mask=enc["attention_mask"],
-            labels=labels,
-        )
-        loss = outputs.loss / grad_accum
-        loss.backward()
-
-        if ((idx // batch_size) + 1) % grad_accum == 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            optimizer.zero_grad()
-            step += 1
-            val_loss = float(loss.item() * grad_accum)
-            losses.append(val_loss)
-            if step % 20 == 0 or step == 1:
-                print(f"Step {step}/{max_steps} | Loss: {val_loss:.4f}")
-
-    # Save LoRA adapter
+    print("=== [SautiLM-Forge] Step 4: Merging LoRA Adapter & Saving HF Checkpoint ===")
     adapter_dir = work_dir / "sautilm_v1_lora_adapter"
-    model.save_pretrained(str(adapter_dir))
-    tokenizer.save_pretrained(str(adapter_dir))
-    print(f"Saved LoRA adapter to {adapter_dir}")
-
-    # Quick qualitative generation check
-    model.eval()
-    test_prompts = [
-        "Qui es-tu et qui t'a créé ?",
-        "Que dit la Constitution de la RDC sur la garde à vue (SautiLM-Ius) ?",
-    ]
-    sample_outputs = {}
-    with torch.no_grad():
-        for tp in test_prompts:
-            formatted = f"<start_of_turn>user\n{tp}<end_of_turn>\n<start_of_turn>model\n"
-            inp = tokenizer(formatted, return_tensors="pt").to(model.device)
-            gen = model.generate(
-                **inp,
-                max_new_tokens=140,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id,
-            )
-            decoded = tokenizer.decode(gen[0][inp["input_ids"].shape[1] :], skip_special_tokens=True)
-            sample_outputs[tp] = decoded.strip()
-            print(f"\n[Prompt]: {tp}\n[SautiLM-v1]: {decoded.strip()}\n")
-
-    # Merge LoRA into base weights
-    print("=== [SautiLM-Forge] Step 4: Merging Weights & Applying SautiLM <=150MB Compression ===")
+    merged_dir = work_dir / "merged_hf_model"
+    model.save_pretrained(adapter_dir)
     merged_model = model.merge_and_unload()
-    merged_dir = work_dir / "merged_model"
-    merged_model.save_pretrained(str(merged_dir), safe_serialization=True)
-    tokenizer.save_pretrained(str(merged_dir))
+    merged_model.eval()
+    merged_model.save_pretrained(merged_dir, safe_serialization=True)
+    tokenizer.save_pretrained(merged_dir)
 
-    # Build INT4 compressed weight bank + TFLite/LiteRT-LM container (<= 145 MB)
-    # Vocabulary compaction to 65,536 tokens + 18 layers INT4/INT8 so total bundle is ~128 MB (< 150 MB)
-    sp_model_path = merged_dir / "tokenizer.model"
-    if not sp_model_path.exists():
-        from huggingface_hub import hf_hub_download
-        sp_dl = hf_hub_download(base_model_id, "tokenizer.model")
-        shutil.copy2(sp_dl, sp_model_path)
+    # Free all PyTorch GPU/CPU training objects before litert-torch conversion
+    del outputs, loss, batch, optimizer, scheduler, model, merged_model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    sp_bytes = sp_model_path.read_bytes()
+    export_info = export_with_litert_torch(merged_dir, work_dir, base_model_id)
 
-    # Quantize merged weights to 4-bit packed blocks for ultra-compact <150MB footprint
-    packed_tensors = []
-    with torch.no_grad():
-        for name, param in merged_model.named_parameters():
-            t = param.detach().to(torch.float16).cpu()
-            if "embed_tokens" in name:
-                # Retain top 65,536 active vocabulary embeddings in INT8 + remaining in INT4
-                t_top = t[:65536]
-                scale_top = t_top.abs().amax(dim=-1, keepdim=True).clamp(min=1e-6) / 127.0
-                q_top = (t_top / scale_top).round().clamp(-128, 127).to(torch.int8)
-                packed_tensors.append(q_top.numpy().tobytes())
-                packed_tensors.append(scale_top.numpy().tobytes())
-            else:
-                # 4-bit symmetric quantization (2 weights per byte) for transformer layers
-                flat = t.flatten()
-                if flat.numel() % 2 != 0:
-                    flat = torch.cat([flat, torch.zeros(1, dtype=flat.dtype)])
-                scale = flat.abs().max().clamp(min=1e-6) / 7.0
-                q = ((flat / scale).round().clamp(-8, 7).to(torch.int8) + 8).to(torch.uint8)
-                packed = (q[0::2] << 4) | (q[1::2] & 0x0F)
-                packed_tensors.append(packed.numpy().tobytes())
-                packed_tensors.append(struct.pack("<e", float(scale.item())))
-
-    # Construct valid TFL3 payload containing the quantized SautiLM-v1 neural tensors
-    raw_weights_blob = b"".join(packed_tensors)
-    tflite_header = b"\x20\x00\x00\x00TFL3\x00\x00\x00\x00\x14\x00\x20\x00\x1c\x00\x18\x00\x14\x00\x10\x00\x0c\x00\x00\x00\x08\x00\x04\x00"
-    tflite_payload = tflite_header + raw_weights_blob
-
-    litertlm_path = work_dir / "sautilm-v1.litertlm"
-    bundle_size = build_litertlm_bundle(
-        output_path=litertlm_path,
-        sp_tokenizer_bytes=sp_bytes,
-        tflite_model_bytes=tflite_payload,
-    )
-    bundle_mb = round(bundle_size / (1024 * 1024), 2)
-    print(f"=== [SautiLM-Forge] Built {litertlm_path.name}: {bundle_mb} MB (Target: <= 150 MB) ===")
-    assert bundle_mb <= 150.0, f"Bundle size {bundle_mb} MB exceeded 150 MB limit!"
-
-    # Save training metrics and generation proofs
+    elapsed = round(time.time() - start_time, 2)
     metrics = {
-        "model_name": "SautiLM-v1",
-        "base_model": "google/gemma-3-270m-it",
-        "organization": "LosingTek Research (Bunia, Ituri, DR Congo)",
+        "model_name": "SautiLM Jua",
+        "base_model": base_model_id,
+        "lora_r": lora_r,
+        "lora_alpha": lora_alpha,
         "steps": step,
-        "initial_loss": losses[0] if losses else None,
-        "final_loss": losses[-1] if losses else None,
-        "loss_history": losses,
-        "litertlm_size_bytes": bundle_size,
-        "litertlm_size_mb": bundle_mb,
-        "training_time_sec": round(time.time() - start_time, 1),
-        "sample_outputs": sample_outputs,
+        "epochs": num_epochs,
+        "initial_loss": round(losses[0], 4) if losses else None,
+        "final_loss": round(losses[-1], 4) if losses else None,
+        "loss_history": [round(x, 4) for x in losses],
+        "training_examples_count": len(encoded_examples),
+        "elapsed_seconds": elapsed,
+        **export_info,
     }
     with open(work_dir / "training_metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False)
 
-    # Remove intermediate unquantized merged_model dir so Kaggle output stays small and fast to download
-    shutil.rmtree(merged_dir, ignore_errors=True)
-    print("=== [SautiLM-Forge] Pipeline Complete! ===")
+    print(f"=== [SautiLM-Forge] COMPLETE in {elapsed}s! Output: {work_dir / export_info['litertlm_filename']} ===")
 
 
 if __name__ == "__main__":

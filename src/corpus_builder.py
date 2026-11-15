@@ -8,13 +8,16 @@ BBADHA_JSON_DIR = WORKSPACE_ROOT / "Flutter" / "bbadha" / "assets" / "jsons"
 FLUTTER_SAUTILM_ASSETS_DATA_DIR = WORKSPACE_ROOT / "Flutter" / "sautilm" / "assets" / "data"
 
 SYSTEM_PROMPT_SAUTILM = (
-    "You are SautiLM (SautiLM-v1), an autonomous offline Edge-AI model developed in Bunia, "
-    "Ituri, DR Congo by LosingTek Research (Georges Byona, Abraham Imani, and Jacques Uwonda). "
-    "You specialize in Bbadha (Kilendu), Kiswahili, French, and English across Education "
-    "(SautiLM-Edu), Mathematics (SautiLM-Math), Community Health (SautiLM-Med), East-DRC "
-    "Lexicography (SautiLM-Lex), and Congolese Law (SautiLM-Ius). Always format responses "
-    "clearly in Markdown using bold (**text**), numbered steps, and bullet points (- ). "
-    "Never use emojis or long dashes."
+    "You are SautiLM Jua, an offline Edge-AI model created in Bunia, Ituri, DRC by "
+    "LosingTek Research (Georges Byona - Edge-AI Researcher, Abraham Imani, Jacques Uwonda). "
+    "You specialize in Bbadha (Kilendu), Kiswahili, French, and English across Education, "
+    "Mathematics, Community Health, East-DRC Lexicography, and Congolese Law. "
+    "Respond clearly in Markdown without emojis or long dashes."
+)
+
+SYSTEM_PROMPT_SAUTILM_SHORT = (
+    "Tu es SautiLM Jua, IA hors-ligne créée à Bunia (RDC) par LosingTek Research "
+    "(Georges Byona, Abraham Imani, Jacques Uwonda). Réponds de façon claire et exacte."
 )
 
 
@@ -28,25 +31,42 @@ def sanitize_sautilm_text(text: str) -> str:
     return cleaned.strip()
 
 
-def format_gemma3_turn(user_prompt: str, model_response: str, domain: str) -> Dict[str, Any]:
-    """Formats an instruction pair into Gemma 3 chat format with SautiLM system context."""
+def format_gemma3_turn(
+    user_prompt: str,
+    model_response: str,
+    domain: str,
+    system_prompt: str | None = SYSTEM_PROMPT_SAUTILM,
+) -> Dict[str, Any]:
+    """Formats an instruction pair into Gemma 3 chat format with optional system context."""
     u = sanitize_sautilm_text(user_prompt)
     m = sanitize_sautilm_text(model_response)
-    sys_msg = sanitize_sautilm_text(SYSTEM_PROMPT_SAUTILM)
-    full_text = (
-        f"<start_of_turn>user\n{sys_msg}\n\n{u}<end_of_turn>\n"
-        f"<start_of_turn>model\n{m}<end_of_turn>"
-    )
-    return {
-        "domain": domain,
-        "prompt": u,
-        "response": m,
-        "text": full_text,
-        "messages": [
+    sys_msg = sanitize_sautilm_text(system_prompt) if system_prompt else ""
+    if sys_msg:
+        full_text = (
+            f"<start_of_turn>user\n{sys_msg}\n\n{u}<end_of_turn>\n"
+            f"<start_of_turn>model\n{m}<end_of_turn>"
+        )
+        messages = [
             {"role": "system", "content": sys_msg},
             {"role": "user", "content": u},
             {"role": "assistant", "content": m},
-        ],
+        ]
+    else:
+        full_text = (
+            f"<start_of_turn>user\n{u}<end_of_turn>\n"
+            f"<start_of_turn>model\n{m}<end_of_turn>"
+        )
+        messages = [
+            {"role": "user", "content": u},
+            {"role": "assistant", "content": m},
+        ]
+    return {
+        "domain": domain,
+        "system": sys_msg,
+        "prompt": u,
+        "response": m,
+        "text": full_text,
+        "messages": messages,
     }
 
 
@@ -282,11 +302,27 @@ def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, 
     return compiled
 
 
-def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Generates rich trilingual instruction pairs from all 1,150 Bbadha dictionary entries."""
-    instructions: List[Dict[str, Any]] = []
+def _is_clean_sft_example(bb_s: str, sw_s: str, fr_s: str) -> bool:
+    """Filters out noisy OCR fragments so SautiLM-Lex trains only on clean trilingual sentences."""
+    if not (bb_s and sw_s and fr_s):
+        return False
+    combined = f"{bb_s} {sw_s} {fr_s}"
+    if any(bad in combined for bad in ("£", "%", "/!", "expr", "£xpr", "Is coulaient")):
+        return False
+    if len(bb_s.strip()) < 3 or len(sw_s.strip()) < 3 or len(fr_s.strip()) < 3:
+        return False
+    return True
 
-    for entry in raw_entries:
+
+def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generates clean, RAG-aware trilingual instruction pairs from all Bbadha entries."""
+    instructions: List[Dict[str, Any]] = []
+    core_words = {
+        "ddà", "'ábba", "'ádzá", "bba", "dyà", "rra", "chà", "zzà",
+        "ddi", "dyi", "ke", "dja", "kpa", "ma", "ni", "kawa",
+    }
+
+    for idx, entry in enumerate(raw_entries):
         word = sanitize_sautilm_text(str(entry.get("word_bbadha") or ""))
         if not word:
             continue
@@ -296,156 +332,230 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
         if not meanings:
             continue
 
-        # Build detailed markdown breakdown of all senses
+        sys_prompt = None if (idx % 2 == 0) else SYSTEM_PROMPT_SAUTILM
+
         sense_lines_fr: List[str] = []
         sense_lines_sw: List[str] = []
-        for m in meanings:
+        first_fr = ""
+        first_sw = ""
+        clean_examples_for_card: List[tuple[str, str, str]] = []
+
+        for s_idx, m in enumerate(meanings):
             if not isinstance(m, dict):
                 continue
-            sid = m.get("sense_id", 1)
+            sid = m.get("sense_id", s_idx + 1)
             sw_t = sanitize_sautilm_text(str(m.get("swahili_translation") or ""))
             fr_t = sanitize_sautilm_text(str(m.get("french_translation") or ""))
-            sense_lines_fr.append(f"{sid}. **Français** : {fr_t} | **Kiswahili** : {sw_t}")
-            sense_lines_sw.append(f"{sid}. **Kiswahili** : {sw_t} | **Kifaransa** : {fr_t}")
+            if not sw_t and not fr_t:
+                continue
+            if not first_fr and fr_t:
+                first_fr = fr_t
+            if not first_sw and sw_t:
+                first_sw = sw_t
 
+            if s_idx < 3:
+                sense_lines_fr.append(f"{sid}. **Français** : {fr_t or '-'} | **Kiswahili** : {sw_t or '-'}")
+                sense_lines_sw.append(f"{sid}. **Kiswahili** : {sw_t or '-'} | **Kifaransa** : {fr_t or '-'}")
+
+            ex_added = 0
             for ex in m.get("examples") or []:
                 if not isinstance(ex, dict):
                     continue
                 bb_s = sanitize_sautilm_text(str(ex.get("bbadha_sentence") or ""))
                 sw_s = sanitize_sautilm_text(str(ex.get("swahili_sentence") or ""))
                 fr_s = sanitize_sautilm_text(str(ex.get("french_sentence") or ""))
-                if bb_s:
+                if not _is_clean_sft_example(bb_s, sw_s, fr_s):
+                    continue
+                if s_idx < 3 and ex_added < 2:
                     sense_lines_fr.append(
-                        f"   - *Exemple Bbadha* : \"{bb_s}\"\n"
-                        f"   - *Traduction Française* : \"{fr_s}\"\n"
-                        f"   - *Traduction Kiswahili* : \"{sw_s}\""
+                        f"   - *Bbadha* : \"{bb_s}\" -> FR: \"{fr_s}\" | SW: \"{sw_s}\""
                     )
                     sense_lines_sw.append(
-                        f"   - *Mfano kwa Kibbadha* : \"{bb_s}\"\n"
-                        f"   - *Tafsiri ya Kiswahili* : \"{sw_s}\"\n"
-                        f"   - *Tafsiri ya Kifaransa* : \"{fr_s}\""
+                        f"   - *Kibbadha* : \"{bb_s}\" -> SW: \"{sw_s}\" | FR: \"{fr_s}\""
                     )
+                    clean_examples_for_card.append((bb_s, sw_s, fr_s))
+                    ex_added += 1
 
-                # Direct sentence translation pairs
-                if bb_s and fr_s and sw_s:
-                    instructions.append(
-                        format_gemma3_turn(
-                            f"Traduis cette phrase Bbadha en français et en kiswahili : \"{bb_s}\"",
-                            f"Voici la traduction vérifiée par SautiLM-Lex (mot racine **{word}**) :\n\n"
-                            f"- **Phrase Bbadha (Kilendu)** : {bb_s}\n"
-                            f"- **Français** : {fr_s}\n"
-                            f"- **Kiswahili** : {sw_s}",
-                            domain="lex",
-                        )
+                instructions.append(
+                    format_gemma3_turn(
+                        f"Traduis cette phrase Bbadha en français et en kiswahili : \"{bb_s}\"",
+                        f"Traduction SautiLM-Lex (**{word}**) :\n\n"
+                        f"- **Bbadha (Kilendu)** : {bb_s}\n"
+                        f"- **Français** : {fr_s}\n"
+                        f"- **Kiswahili** : {sw_s}",
+                        domain="lex",
+                        system_prompt=None if (len(instructions) % 2 == 0) else SYSTEM_PROMPT_SAUTILM_SHORT,
                     )
-                    instructions.append(
-                        format_gemma3_turn(
-                            f"Tafsiri sentensi hii kwa Kibbadha na Kifaransa: \"{sw_s}\"",
-                            f"Hii hapa tafsiri sahihi kutoka kwenye kamusi ya SautiLM-Lex (neno **{word}**):\n\n"
-                            f"- **Kibbadha (Kilendu)** : {bb_s}\n"
-                            f"- **Kiswahili** : {sw_s}\n"
-                            f"- **Kifaransa** : {fr_s}",
-                            domain="lex",
-                        )
+                )
+                instructions.append(
+                    format_gemma3_turn(
+                        f"Tafsiri sentensi hii kwa Kibbadha na Kifaransa : \"{sw_s}\"",
+                        f"Tafsiri ya SautiLM-Lex (**{word}**) :\n\n"
+                        f"- **Kibbadha (Kilendu)** : {bb_s}\n"
+                        f"- **Kiswahili** : {sw_s}\n"
+                        f"- **Kifaransa** : {fr_s}",
+                        domain="lex",
+                        system_prompt=None if (len(instructions) % 2 == 0) else SYSTEM_PROMPT_SAUTILM_SHORT,
                     )
+                )
 
         if sense_lines_fr:
             card_fr = (
                 f"### Fiche Lexicale SautiLM-Lex : **{word}**\n\n"
                 f"- **Langue** : Bbadha (Kilendu - Ituri, Est de la RDC)\n"
                 f"- **Phonétique** : {phonetics}\n"
-                f"- **Catégorie grammaticale** : {grammar}\n\n"
-                f"**Sens et exemples vérifiés :**\n" + "\n".join(sense_lines_fr)
+                f"- **Grammaire** : {grammar}\n\n"
+                f"**Sens et exemples :**\n" + "\n".join(sense_lines_fr)
             )
             instructions.append(
                 format_gemma3_turn(
-                    f"Que signifie le mot Bbadha \"{word}\" ? Donne les détails du dictionnaire (sens, grammaire et exemples).",
+                    f"Que signifie le mot Bbadha \"{word}\" ?",
                     card_fr,
                     domain="lex",
+                    system_prompt=sys_prompt,
                 )
             )
 
             card_sw = (
                 f"### Kamusi ya SautiLM-Lex : **{word}**\n\n"
-                f"- **Lugha** : Kibbadha (Kilendu - Ituri, Mashariki ya RDC)\n"
+                f"- **Lugha** : Kibbadha (Kilendu - Ituri, RDC)\n"
                 f"- **Matamshi** : {phonetics}\n"
                 f"- **Sarufi** : {grammar}\n\n"
-                f"**Maana na mifano halisi :**\n" + "\n".join(sense_lines_sw)
+                f"**Maana na mifano :**\n" + "\n".join(sense_lines_sw)
             )
             instructions.append(
                 format_gemma3_turn(
                     f"Neno la Kibbadha \"{word}\" lina maana gani kwa Kiswahili na Kifaransa?",
                     card_sw,
                     domain="lex",
+                    system_prompt=sys_prompt,
                 )
             )
 
-        # Reverse lookup (French/Swahili -> Bbadha)
-        first_m = meanings[0] if isinstance(meanings[0], dict) else {}
-        first_fr = sanitize_sautilm_text(str(first_m.get("french_translation") or ""))
-        first_sw = sanitize_sautilm_text(str(first_m.get("swahili_translation") or ""))
+            # Ground model to strictly respect Flutter's DICTIONNAIRE BBADHA VERIFIE RAG context
+            if word.lower() in core_words or idx < 80:
+                rag_sys = (
+                    "Tu es SautiLM-Lex, assistant lexicographique hors-ligne de SautiLM. "
+                    "Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
+                    f"DICTIONNAIRE BBADHA VERIFIE: Mot: {word} | Grammaire: {grammar} | "
+                    f"Kiswahili: {first_sw or '-'} | Francais: {first_fr or '-'}."
+                )
+                rag_ex = ""
+                if clean_examples_for_card:
+                    b0, s0, f0 = clean_examples_for_card[0]
+                    rag_sys += f" | Exemple Bbadha: \"{b0}\" -> SW: \"{s0}\" | FR: \"{f0}\""
+                    rag_ex = f"\n- **Exemple vérifié** : *\"{b0}\"* (FR: {f0} | SW: {s0})"
+                instructions.append(
+                    format_gemma3_turn(
+                        f"Que signifie le mot Bbadha {word} ?",
+                        f"Selon le dictionnaire Bbadha vérifié (**SautiLM-Lex**), le mot **{word}** ({grammar}) signifie :\n\n"
+                        f"- **Français** : {first_fr or '-'}\n"
+                        f"- **Kiswahili** : {first_sw or '-'}{rag_ex}",
+                        domain="lex",
+                        system_prompt=rag_sys,
+                    )
+                )
+
         if first_fr and first_sw:
             instructions.append(
                 format_gemma3_turn(
                     f"Comment dit-on \"{first_fr}\" ({first_sw}) en langue Bbadha (Kilendu) ?",
-                    f"En langue **Bbadha (Kilendu)**, l'équivalent de **\"{first_fr}\"** (Kiswahili : **{first_sw}**) est :\n\n"
+                    f"En **Bbadha (Kilendu)**, l'équivalent de **\"{first_fr}\"** (Kiswahili : **{first_sw}**) est :\n\n"
                     f"- **Mot Bbadha** : **{word}**\n"
                     f"- **Phonétique** : {phonetics}\n"
                     f"- **Grammaire** : {grammar}",
                     domain="lex",
+                    system_prompt=None if (idx % 2 == 1) else SYSTEM_PROMPT_SAUTILM_SHORT,
                 )
             )
+
+    # Natural accent-free / direct lexical Q&As for high-frequency community words
+    natural_lex_qas = [
+        (
+            "Que signifie le mot Bbadha Dda ?",
+            "En langue **Bbadha (Kilendu)**, **ddà** (souvent écrit *Dda*) possède deux sens essentiels selon le contexte tonal :\n\n"
+            "1. **L'eau / La rivière** (*Kiswahili* : **maji**, **mto** | *English* : **water**, **river**).\n"
+            "2. **Long / Lointain** (*Kiswahili* : **kuwa refu**, **mbali** | *English* : **long**, **far**).",
+        ),
+        (
+            "Explain the Bbadha word ddà",
+            "In **Bbadha (Kilendu)** spoken in Ituri (DRC), **ddà** means:\n\n"
+            "1. **Water / River** (*French* : **l'eau, la rivière** | *Kiswahili* : **maji, mto**).\n"
+            "2. **Far / Long** (*French* : **loin, long** | *Kiswahili* : **mbali, refu**).",
+        ),
+        (
+            "Tafsiri neno la Kibbadha: dda",
+            "Katika lugha ya **Kibbadha (Kilendu - Ituri, RDC)**, neno **ddà** (*dda*) lina maana kuu mbili:\n\n"
+            "1. **Maji / Mto** (*Kifaransa* : **l'eau, la rivière** | *Kiingereza* : **water, river**).\n"
+            "2. **Mbali / Kuwa refu** (*Kifaransa* : **loin, long**).",
+        ),
+    ]
+    for q, a in natural_lex_qas:
+        for sys_p in (None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM):
+            instructions.append(format_gemma3_turn(q, a, domain="lex", system_prompt=sys_p))
 
     return instructions
 
 
 def generate_identity_instructions() -> List[Dict[str, Any]]:
-    """Generates SautiLM native identity instructions (replacing Gemma identity)."""
+    """Generates SautiLM Jua native identity instructions across FR/SW/EN and bare/system prompts."""
     pairs = [
         (
+            "Qui es-tu ?",
+            "Je suis **SautiLM Jua**, un modèle d'intelligence artificielle hors-ligne conçu à **Bunia (Ituri, RDC)** par **LosingTek Research**.\n\n"
+            "**Équipe de recherche et fondation :**\n"
+            "1. **Georges Byona** - Cofondateur, Software Engineer & Edge-AI Researcher\n"
+            "2. **Abraham Imani** - Cofondateur & AI/ML Lead\n"
+            "3. **Jacques Uwonda** - Cofondateur & Software Engineer\n\n"
+            "Je fonctionne 100% localement sur smartphone sans connexion Internet pour le **Bbadha (Kilendu)**, le **Kiswahili**, le **Français** et l'**Anglais**.",
+        ),
+        (
             "Qui es-tu et qui t'a créé ?",
-            "Je suis **SautiLM (SautiLM-v1)**, un modèle d'intelligence artificielle hors-ligne conçu à **Bunia (Ituri, République Démocratique du Congo)** par **LosingTek Research**.\n\n"
+            "Je suis **SautiLM Jua**, le premier modèle fondation compact de **SautiLM** créé à **Bunia (Ituri, République Démocratique du Congo)** par **LosingTek Research**.\n\n"
             "**Équipe de recherche et de fondation :**\n"
-            "1. **Georges Byona** - Cofondateur, Software Engineer & Chercheur Edge-AI\n"
+            "1. **Georges Byona** - Cofondateur, Software Engineer & Edge-AI Researcher\n"
             "2. **Abraham Imani** - Cofondateur & AI/ML Lead (Université Catholique de Bukavu)\n"
             "3. **Jacques Uwonda** - Cofondateur & Software Engineer (Université Shalom de Bunia)\n\n"
-            "**Ma mission :** Offrir une IA locale ultra-légère (moins de 150 Mo), 100% hors-ligne et souveraine pour les langues marginalisées de l'Est de la RDC (comme le **Bbadha / Kilendu** et le **Kiswahili**), l'éducation (**SautiLM-Edu**), les mathématiques (**SautiLM-Math**), la santé communautaire (**SautiLM-Med**), la traduction (**SautiLM-Lex**) et le droit congolais (**SautiLM-Ius**).",
+            "**Ma mission :** Offrir une IA locale ultra-légère et souveraine pour les langues de l'Est de la RDC (**Bbadha / Kilendu**, **Kiswahili**), l'éducation (**SautiLM-Edu**), les mathématiques (**SautiLM-Math**), la santé communautaire (**SautiLM-Med**), la lexicographie (**SautiLM-Lex**) et le droit congolais (**SautiLM-Ius**).",
         ),
         (
             "Wewe ni nani na umeundwa na nani?",
-            "Mimi ni **SautiLM (SautiLM-v1)**, mfumo wa akili mnemba unaofanya kazi 100% bila mtandao (Offline Edge-AI) ulioundwa mjini **Bunia (Ituri, Jamhuri ya Kidemokrasia ya Kongo)** na **LosingTek Research**.\n\n"
+            "Mimi ni **SautiLM Jua**, mfumo wa akili mnemba unaofanya kazi 100% bila mtandao (Offline Edge-AI) ulioundwa mjini **Bunia (Ituri, Jamhuri ya Kidemokrasia ya Kongo)** na **LosingTek Research**.\n\n"
             "**Waanzilishi na Watafiti Wakuu :**\n"
-            "1. **Georges Byona** - Mwanzilishi Mwenza & Mhandisi wa Programu\n"
+            "1. **Georges Byona** - Mwanzilishi Mwenza, Software Engineer & Edge-AI Researcher\n"
             "2. **Abraham Imani** - Mwanzilishi Mwenza & Kiongozi wa AI/ML (UCB Bukavu)\n"
             "3. **Jacques Uwonda** - Mwanzilishi Mwenza & Mhandisi wa Programu (USB Bunia)\n\n"
-            "Ninafanya kazi moja kwa moja kwenye simu bila kutumia bando la intaneti ili kusaidia jamii za Mashariki ya RDC katika elimu (**SautiLM-Edu**), mahesabu (**SautiLM-Math**), afya (**SautiLM-Med**), tafsiri ya Kibbadha na Kiswahili (**SautiLM-Lex**), na sheria za Kongo (**SautiLM-Ius**).",
+            "Ninafanya kazi moja kwa moja kwenye simu bila kutumia intaneti kusaidia jamii katika elimu (**SautiLM-Edu**), mahesabu (**SautiLM-Math**), afya (**SautiLM-Med**), tafsiri ya Kibbadha na Kiswahili (**SautiLM-Lex**), na sheria za Kongo (**SautiLM-Ius**).",
         ),
         (
             "Who are you? Are you Gemma or ChatGPT?",
-            "I am **SautiLM (SautiLM-v1)**, an ultra-compact offline Edge-AI model created by **LosingTek Research** in **Bunia, Ituri, Democratic Republic of the Congo**. I am distilled and specialized for low-resource African languages (starting with **Bbadha / Kilendu** and **Congolese Swahili**) and engineered to run under 150 MB directly on mobile phones with zero internet connection.\n\n"
-            "**Core SautiLM Ecosystem :**\n"
-            "- **SautiLM-Edu** : Mother-tongue literacy, environmental science, and pocket tutoring\n"
-            "- **SautiLM-Math** : Step-by-step arithmetic and pastoralist commerce calculations\n"
-            "- **SautiLM-Med** : Community health prevention, water sanitation, and livestock care\n"
-            "- **SautiLM-Lex** : Bidirectional translation across Eastern DRC indigenous languages\n"
-            "- **SautiLM-Ius** : Offline legal assistant for Congolese Law (Constitution, Family Code, Penal Code, OHADA)",
+            "I am **SautiLM Jua**, a sovereign offline Edge-AI model created by **LosingTek Research** in **Bunia, Ituri, Democratic Republic of the Congo**.\n\n"
+            "**Founding Team :**\n"
+            "1. **Georges Byona** - Co-founder, Software Engineer & Edge-AI Researcher\n"
+            "2. **Abraham Imani** - Co-founder & AI/ML Lead\n"
+            "3. **Jacques Uwonda** - Co-founder & Software Engineer\n\n"
+            "I am specialized for low-resource African languages (starting with **Bbadha / Kilendu** and **Congolese Swahili**) to run directly on Android smartphones via LiteRT-LM with zero internet connection.",
         ),
         (
             "Quels sont les modèles de la famille SautiLM ?",
-            "La famille **SautiLM** développée par **LosingTek Research** comprend :\n\n"
-            "1. **SautiLM-v1 (Core Omni <= 150 Mo)** : Le premier modèle fondation compact pour smartphones Android d'entrée de gamme.\n"
-            "2. **SautiLM-Edu** : Tuteur pédagogique hors-ligne en langue maternelle (sciences, environnement, lecture).\n"
-            "3. **SautiLM-Math** : Moteur de raisonnement arithmétique et de calculs pratiques pour les écoles et les communautés agropastorales.\n"
-            "4. **SautiLM-Med** : Assistant pour les relais communautaires et agents de santé (hygiène de l'eau, prévention du choléra, soins vétérinaires).\n"
-            "5. **SautiLM-Lex** : Pont lexical et traducteur neuronal pour les langues de l'Est de la RDC (Bbadha/Kilendu, Kiswahili, Français, Anglais).\n"
-            "6. **SautiLM-Ius** : Le premier modèle juridique 100% hors-ligne dédié à la loi congolaise (Constitution de la RDC, Code de la Famille, Code Pénal, Code du Travail, Droit OHADA) pour assister les avocats, magistrats et citoyens.",
+            "La feuille de route **SautiLM** développée par **LosingTek Research** repose sur une série de modèles nommés en **Kiswahili court** :\n\n"
+            "1. **SautiLM Jua** : Premier modèle fondation compact texte hors-ligne (Bbadha, Kiswahili, Français, Anglais).\n"
+            "2. **SautiLM Nuru** : Modèle multimodal vision (OCR manuscrit et diagnostic visuel).\n"
+            "3. **SautiLM Wazo, Kuu, Mali, Moto** : Raisonnement avancé, modèle généraliste élargi, économie/microfinance, et voix bidirectionnelle.\n\n"
+            "**Domaines spécialisés :** **Lex**, **Edu**, **Math**, **Med**, **Ius**, **Agri**, **Fin**, **Civ**, **Voice** et **Vision**.",
+        ),
+        (
+            "Qui est Georges Byona ?",
+            "**Georges Byona** est **Cofondateur, Software Engineer & Edge-AI Researcher** au sein de **LosingTek Research** (Bunia, Ituri, République Démocratique du Congo), et créateur de l'écosystème **SautiLM**.\n\n"
+            "Il travaille aux côtés d'**Abraham Imani** (Cofondateur & AI/ML Lead) et de **Jacques Uwonda** (Cofondateur & Software Engineer) pour concevoir des modèles d'intelligence artificielle souverains et hors-ligne en **Bbadha (Kilendu)**, **Kiswahili**, **Français** et **Anglais** sur smartphone Android.",
         ),
     ]
-    # Replicate with varied phrasings to strongly anchor SautiLM identity during SFT
     out: List[Dict[str, Any]] = []
-    for _ in range(15):
+    prompts_cycle = [None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM]
+    for rep in range(12):
+        sys_p = prompts_cycle[rep % len(prompts_cycle)]
         for q, a in pairs:
-            out.append(format_gemma3_turn(q, a, domain="identity"))
+            out.append(format_gemma3_turn(q, a, domain="identity", system_prompt=sys_p))
     return out
 
 
@@ -524,8 +634,10 @@ def generate_math_instructions() -> List[Dict[str, Any]]:
         (450, 18, "*", 8100),
         (960, 16, "/", 60),
     ]
+    prompts_cycle = [None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM]
     for a, b, op, res in ops:
-        for _ in range(5):
+        for rep in range(5):
+            sys_p = prompts_cycle[rep % len(prompts_cycle)]
             out.append(
                 format_gemma3_turn(
                     f"Calcule exactement : {a} {op} {b}",
@@ -533,9 +645,17 @@ def generate_math_instructions() -> List[Dict[str, Any]]:
                     f"- **Opération** : `{a} {op} {b}`\n"
                     f"- **Résultat exact** : **{res}**",
                     domain="math",
+                    system_prompt=sys_p,
                 )
             )
-    return out
+    # Assign varied system prompts across existing math entries too
+    mixed: List[Dict[str, Any]] = []
+    for idx, row in enumerate(out):
+        sys_p = prompts_cycle[idx % len(prompts_cycle)]
+        mixed.append(
+            format_gemma3_turn(row["prompt"], row["response"], domain="math", system_prompt=sys_p)
+        )
+    return mixed
 
 
 def generate_edu_and_med_instructions() -> List[Dict[str, Any]]:
@@ -558,6 +678,19 @@ def generate_edu_and_med_instructions() -> List[Dict[str, Any]]:
             "3. **Précipitations :** L'eau retombe sous forme de pluie (**Ddi**).\n"
             "4. **Rôle des arbres (Ke) :** Les racines des arbres retiennent la terre sur les collines d'Ituri et du Kivu, empêchant l'érosion et les glissements de terrain.",
         ),
+        (
+            "Comment enregistrer un acte de naissance en RDC et promouvoir la paix communautaire (Kawa) ?",
+            "### Administration Civile & Médiation (SautiLM-Civ)\n\n"
+            "**Vocabulaire Bbadha :** Paix = **Kawa** | Enfant = **Ngù** | Village = **Bba**\n\n"
+            "1. **Déclaration de naissance (Code de la Famille Art. 116) :** Tout enfant né en RDC doit être déclaré dans les **90 jours** suivant la naissance devant l'Officier de l'État Civil (Commune ou Secteur) afin d'obtenir gratuitement l'acte de naissance.\n"
+            "2. **Médiation locale (Kawa) :** Dans les conflits fonciers ou communautaires au village (**Bba**), le dialogue pacifique, l'écoute des témoins et la réconciliation précèdent le recours contentieux.",
+        ),
+        (
+            "Comment gérer la caisse d'une AVEC (Association Villageoise d'Épargne et de Crédit) hors-ligne ?",
+            "### Microfinance & Comptabilité AVEC (SautiLM-Fin)\n\n"
+            "1. **Caisse à trois cadenas :** Toutes les cotisations hebdomadaires (parts d'épargne + caisse sociale d'urgence) sont enregistrées publiquement devant les membres.\n"
+            "2. **Calcul des prêts et intérêts :** Si un membre emprunte **50 000 FC** à un taux de **10 %** par mois sur 2 mois, l'intérêt est de `50 000 x 10 % = 5 000 FC` par mois, soit **10 000 FC** d'intérêts et **60 000 FC** à rembourser.",
+        ),
     ]
 
     med_pairs = [
@@ -567,7 +700,7 @@ def generate_edu_and_med_instructions() -> List[Dict[str, Any]]:
             "**Msamiati wa Kibbadha :** Maji = **Dda** | Ugonjwa = **Rra** | Dawa = **Chà**\n\n"
             "1. **Kuchuja (Filtration) :** Chuja maji (**Dda**) kwa kitambaa safi ili kuondoa uchafu unaoonekana.\n"
             "2. **Kuchemsha au Kutia Klorini (Boiling / Chlorination) :** Chemsha maji hadi yatoe mapovu makubwa kwa dakika 1 hadi 3, au tumia vidonge vya klorini (**Chà**) kulingana na kipimo cha lita 20.\n"
-            "3. **Kuhifadhi kwa Usafi (Safe Storage) :** Hifadhi maji kwenyeao chombo safi kilichofunikwa na osha mikono kwa sabuni kabla ya kula chakula (**Zzà**).",
+            "3. **Kuhifadhi kwa Usafi (Safe Storage) :** Hifadhi maji kwenye chombo safi kilichofunikwa na osha mikono kwa sabuni kabla ya kula chakula (**Zzà**).",
         ),
         (
             "Quelles sont les 3 étapes essentielles pour purifier l'eau (Dda) et prévenir le choléra (Rra) ?",
@@ -580,11 +713,13 @@ def generate_edu_and_med_instructions() -> List[Dict[str, Any]]:
     ]
 
     out: List[Dict[str, Any]] = []
-    for _ in range(15):
+    prompts_cycle = [None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM]
+    for rep in range(15):
+        sys_p = prompts_cycle[rep % len(prompts_cycle)]
         for q, a in edu_pairs:
-            out.append(format_gemma3_turn(q, a, domain="edu"))
+            out.append(format_gemma3_turn(q, a, domain="edu", system_prompt=sys_p))
         for q, a in med_pairs:
-            out.append(format_gemma3_turn(q, a, domain="med"))
+            out.append(format_gemma3_turn(q, a, domain="med", system_prompt=sys_p))
     return out
 
 
@@ -640,69 +775,84 @@ def generate_congolese_law_instructions() -> List[Dict[str, Any]]:
             "3. **Haki ya Wakili na kutojumuishwa kuwa mhalifu kabla ya hukumu :**\n"
             "   - Kila mshukiwa anachukuliwa kuwa hana hatia hadi mahakama itakapothibitisha kosa lake, na ana haki ya kusaidiwa na wakili katika hatua zote.",
         ),
+        (
+            "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?",
+            "### Droit Constitutionnel Congolais : Garde à Vue & Droits de la Défense (SautiLM-Ius)\n\n"
+            "**Référence légale :** **Articles 17, 18 et 19 de la Constitution de la RDC**.\n\n"
+            "1. **Durée maximale de la garde à vue (Art. 18 al. 4) :** La garde à vue ne peut en aucun cas excéder **48 heures**. À l'expiration de ce délai de **48 heures**, la personne gardée à vue doit être immédiatement relâchée ou mise à la disposition de l'autorité judiciaire compétente (Parquet).\n"
+            "2. **Information des motifs (Art. 18 al. 1-2) :** Toute personne arrêtée doit être informée immédiatement des motifs de son arrestation dans une langue qu'elle comprend.\n"
+            "3. **Droit à l'avocat et présomption d'innocence (Art. 17 & 19) :** Le droit d'être assisté par un avocat ou défenseur judiciaire est garanti dès l'enquête préliminaire, et toute personne accusée est présumée innocente jusqu'à condamnation définitive.",
+        ),
+        (
+            "Quels sont les types de sociétés commerciales reconnus en RDC selon l'Acte uniforme OHADA et comment protéger un salarié ?",
+            "### Droit Commercial OHADA & Droit du Travail en RDC (SautiLM-Ius)\n\n"
+            "1. **Sociétés OHADA en RDC :** L'Acte uniforme OHADA (AUSCGIE) reconnaît notamment la **SARL** (Société à Responsabilité Limitée), la **SA** (Société Anonyme), la **SAS** (Société par Actions Simplifiée), la **SNC**, la **SCS** et le **GIE**.\n"
+            "2. **Code du Travail (Loi n° 015/2002 modifiée par la Loi n° 16/010) :** Tout licenciement exige un motif valable lié à l'aptitude, à la conduite ou aux nécessités de l'entreprise, avec respect du préavis légal et paiement du décompte final.",
+        ),
     ]
 
     out: List[Dict[str, Any]] = []
-    for _ in range(15):
+    prompts_cycle = [None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM]
+    for rep in range(15):
+        sys_p = prompts_cycle[rep % len(prompts_cycle)]
         for q, a in law_pairs:
-            out.append(format_gemma3_turn(q, a, domain="ius"))
+            out.append(format_gemma3_turn(q, a, domain="ius", system_prompt=sys_p))
     return out
 
 
 def generate_vision_instructions() -> List[Dict[str, Any]]:
-    """Generates multimodal scene & OCR analysis instructions for SautiLM-Vision."""
+    """Generates OCR text solving, field symptom analysis, and honest vision-scope instructions."""
     vision_pairs = [
         (
-            "[IMAGE_SCENE: Feuille de manioc présentant des taches jaunes et vertes en mosaïque et un enroulement du limbe] Analyse cette image et donne les recommandations agricoles.",
-            "### Analyse Visuelle Agronomique (SautiLM-Vision)\n\n"
+            "Symptômes observés sur une feuille de manioc : taches jaunes et vertes en mosaïque et feuilles recroquevillées. Quel est le diagnostic agricole ?",
+            "### Diagnostic Agronomique (SautiLM-Agri)\n\n"
             "1. **Diagnostic Principal :**\n"
-            "   - **Culture identifiée** : Manioc (*Manihot esculenta*)\n"
-            "   - **Anomalie observée** : Mosaïque du manioc (Cassava Mosaic Disease - CMD)\n"
-            "2. **Symptômes Visuels Détectés :**\n"
-            "   - Alternance de plages chlorotiques (jaunes) et vertes sur le limbe.\n"
-            "   - Déformation et réduction de la surface foliaire.\n"
-            "3. **Plan d'Action Hors-Ligne :**\n"
+            "   - **Culture** : Manioc (*Manihot esculenta*)\n"
+            "   - **Maladie probable** : Mosaïque du manioc (Cassava Mosaic Disease - CMD)\n"
+            "2. **Plan d'Action Hors-Ligne :**\n"
             "   - Arracher et détruire les plants sévèrement atteints dès le jeune stade.\n"
-            "   - Utiliser exclusivement des boutures saines certifiées résistantes lors de la prochaine saison.\n"
-            "   - Contrôler le vecteur mouche blanche (*Bemisia tabaci*) avec un extrait naturel de feuilles de Neem.",
+            "   - Utiliser des boutures saines certifiées résistantes lors de la prochaine saison.\n"
+            "   - Contrôler la mouche blanche (*Bemisia tabaci*) avec un extrait de feuilles de Neem.",
         ),
         (
-            "[IMAGE_OCR: Exercice au tableau : 24 x 15 + 140 = ?] Lis l'image du tableau et résous ce calcul étape par étape.",
-            "### Lecture d'Image & Résolution Mathématique (SautiLM-Vision & SautiLM-Math)\n\n"
-            "**Texte détecté sur l'image :** `24 x 15 + 140 = ?`\n\n"
-            "1. **Étape 1 (Priorité à la multiplication) :**\n"
-            "   - `24 x 15 = 360`\n"
-            "2. **Étape 2 (Addition finale) :**\n"
-            "   - `360 + 140 = 500`\n\n"
-            "**Réponse finale :** Le résultat exact de l'exercice photographié est **500**.",
+            "Texte relevé au tableau : 24 x 15 + 140 = ? Résous ce calcul étape par étape.",
+            "### Lecture OCR & Résolution Mathématique (SautiLM-Math)\n\n"
+            "**Expression relevée :** `24 x 15 + 140 = ?`\n\n"
+            "1. **Étape 1 (Multiplication prioritaire) :** `24 x 15 = 360`\n"
+            "2. **Étape 2 (Addition finale) :** `360 + 140 = 500`\n\n"
+            "**Réponse finale :** **500**.",
         ),
         (
-            "[IMAGE_SCENE: Jani la mahindi lenye madoa ya kahawia na kutu kwenye uso wa jani] Chambua picha hii kwa mkulima.",
-            "### Uchambuzi wa Picha ya Mazao (SautiLM-Vision)\n\n"
-            "1. **Utambuzi Mkuu :**\n"
-            "   - **Zao** : Mahindi\n"
-            "   - **Ugonjwa** : Kutu ya Majani ya Mahindi (Maize Common Rust - *Puccinia sorghi*)\n"
-            "2. **Dalili Zilizoonwa Kwenye Picha :**\n"
-            "   - Vipele vidogo vya rangi ya kahawia na kutu juu na chini ya jani.\n"
-            "3. **Hatua za Kuchukua :**\n"
-            "   - Panda mbegu zinazostahimili kutu na zingatia mzunguko wa mazao (crop rotation) na maharagwe.\n"
-            "   - Nyunyiza mchanganyiko wa majivu ya kuni na maji ya mwarobaini (Neem) mapema asubuhi.",
+            "Dalili kwenye jani la mahindi: madoa madogo ya kahawia na kutu juu na chini ya jani. Mkulima afanyeje?",
+            "### Uchambuzi wa Mazao (SautiLM-Agri)\n\n"
+            "1. **Utambuzi Mkuu :** Kutu ya Majani ya Mahindi (Maize Common Rust - *Puccinia sorghi*).\n"
+            "2. **Hatua za Kuchukua :**\n"
+            "   - Panda mbegu zinazostahimili kutu na zingatia mzunguko wa mazao na maharagwe.\n"
+            "   - Tumia mchanganyiko wa majivu na mwarobaini (Neem) mapema asubuhi kwenye majani machanga.",
+        ),
+        (
+            "Peux-tu analyser une photo directement en mode hors-ligne ?",
+            "**SautiLM Jua** est le premier modèle fondation compact axé sur le **texte hors-ligne** (lexique Bbadha, Kiswahili, français, anglais, mathématiques, droit et santé).\n\n"
+            "- Si vous saisissez le **texte relevé (OCR)** ou la **description des symptômes observés**, je peux l'analyser immédiatement sans Internet.\n"
+            "- L'analyse directe des pixels d'image est réservée à **SautiLM Nuru** (modèle multimodal vision de la série SautiLM).",
         ),
     ]
 
     out: List[Dict[str, Any]] = []
-    for _ in range(15):
+    prompts_cycle = [None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM]
+    for rep in range(12):
+        sys_p = prompts_cycle[rep % len(prompts_cycle)]
         for q, a in vision_pairs:
-            out.append(format_gemma3_turn(q, a, domain="vision"))
+            out.append(format_gemma3_turn(q, a, domain="vision", system_prompt=sys_p))
     return out
 
 
 def build_all_corpora(output_dir: Path) -> Dict[str, Any]:
-    """Builds the full SautiLM-v1 JSONL training dataset and the 1,150-word mobile lexicon."""
+    """Builds the SautiLM Jua JSONL training dataset and the full Bbadha mobile lexicon."""
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_entries = load_bbadha_raw_entries(BBADHA_JSON_DIR)
 
-    # 1. Compile mobile lexicon (all 1,150 Bbadha entries)
+    # 1. Compile mobile lexicon (all Bbadha entries)
     mobile_lexicon = compile_mobile_lexicon(raw_entries)
     lex_path = output_dir / "bbadha_full_lexicon.json"
     with open(lex_path, "w", encoding="utf-8") as f:
@@ -732,6 +882,7 @@ def build_all_corpora(output_dir: Path) -> Dict[str, Any]:
         domain_counts[d] = domain_counts.get(d, 0) + 1
 
     stats = {
+        "model_series": "SautiLM Jua",
         "lexicon_count": len(mobile_lexicon),
         "total_instructions": len(all_instructions),
         "domain_counts": domain_counts,
