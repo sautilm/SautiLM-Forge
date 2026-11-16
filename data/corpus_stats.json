@@ -1,18 +1,21 @@
 {
-  "model_series": "SautiLM Jua",
+  "model_series": "SautiLM-Jua",
+  "target": "jua",
   "lexicon_count": 1150,
-  "total_instructions": 23171,
+  "total_instructions": 23500,
   "domain_counts": {
     "identity": 72,
-    "lex": 22521,
+    "lex": 22542,
+    "stem": 260,
     "math": 89,
-    "edu": 84,
-    "med": 54,
-    "ius": 122,
-    "vision": 108,
-    "agri": 36,
-    "fin": 49,
-    "civ": 36
+    "edu": 54,
+    "med": 62,
+    "ius": 156,
+    "agri": 66,
+    "fin": 64,
+    "civ": 51,
+    "vision": 52,
+    "voice": 32
   },
   "train_jsonl_path": "data/sautilm_v1_train.jsonl",
   "mobile_lexicon_path": "data/bbadha_full_lexicon.json"

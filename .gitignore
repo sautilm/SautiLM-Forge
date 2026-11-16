@@ -20,16 +20,22 @@ __pycache__/
 *.egg-info/
 
 # Corpus proprietaire complet (protege - seul le schema d'exemple est public)
-data/sautilm_v1_train.jsonl
+data/sautilm_*.jsonl
 data/bbadha_full_lexicon.json
+
+# Documentation interne, strategique et partenariats (privee - hors GitHub public)
+docs/private/
 
 # Artefacts lourds & checkpoints locaux
 build/
 dist/
 models/
 checkpoints/
-kaggle_output/sautilm_v1_lora_adapter/
+kaggle_output/*_lora_adapter/
 kaggle_output/*.log
+kaggle_probe_lora/
+kaggle_probe_lora_cpu/
+kaggle_probe_output/
 *.litertlm
 *.gguf
 *.tflite

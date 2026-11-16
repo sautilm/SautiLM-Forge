@@ -92,7 +92,7 @@ def generate_greetings_and_multiturn() -> List[Dict[str, Any]]:
          "STEM quizzes, circuit/biology checks, and transcribed chalkboard problems",
          "les quiz STEM, la biologie, la physique et l'analyse de textes OCR",
          "maswali ya STEM, sayansi na uchambuzi wa maandishi ya ubao"),
-        ("SautiLM-Voice", "vision", "Voice & Pocket Tutor", "Voix & Tuteur Général", "Sauti na Mwalimu Mkuu",
+        ("SautiLM-Voice", "voice", "Voice & Pocket Tutor", "Voix & Tuteur Général", "Sauti na Mwalimu Mkuu",
          "Bbadha tones, phonetics, study methods, and clear writing",
          "les tons Bbadha, la phonétique, les méthodes d'étude et la rédaction",
          "toni za Kibbadha, matamshi, mbinu za kusoma na uandishi bora"),
@@ -124,23 +124,23 @@ def generate_greetings_and_multiturn() -> List[Dict[str, Any]]:
 
         for idx, g in enumerate(en_greets):
             if g in ("Thanks", "Thank you"):
-                resp = f"You are welcome! Feel free to ask any {t_en.lower()} question anytime here in **{code}** (100% offline)."
+                resp = f"You are welcome! Feel free to ask any {t_en.lower()} question anytime in **{code}** (100% offline)."
             else:
-                resp = f"Hello! I am **{code}** (powered offline by **SautiLM Jua**). How can I help you today with {help_en}?"
+                resp = f"Hello! I am **{code}** (SautiLM-Jua offline). How can I help you today with {help_en}?"
             out.append(_turn(dom, roles["en"] if idx % 2 == 0 else None, g, resp))
 
         for idx, g in enumerate(fr_greets):
             if g == "Merci":
                 resp = f"Avec plaisir ! N'hésitez pas à me poser d'autres questions sur {help_fr} avec **{code}**."
             else:
-                resp = f"Bonjour ! Je suis **{code}** (propulsé hors-ligne par **SautiLM Jua**). Comment puis-je vous aider aujourd'hui concernant {help_fr} ?"
+                resp = f"Bonjour ! Je suis **{code}** (SautiLM-Jua hors-ligne). Comment puis-je vous aider aujourd'hui concernant {help_fr} ?"
             out.append(_turn(dom, roles["fr"] if idx % 2 == 0 else None, g, resp))
 
         for idx, g in enumerate(sw_greets):
             if g == "Asante":
                 resp = f"Karibu sana! Unaweza kuniuliza swali lolote kuhusu {help_sw} kupitia **{code}** bila mtandao."
             else:
-                resp = f"Habari! Mimi ni **{code}** (ndani ya **SautiLM Jua** bila mtandao). Nikusaidieje leo kuhusu {help_sw}?"
+                resp = f"Habari! Mimi ni **{code}** (SautiLM-Jua bila mtandao). Nikusaidieje leo kuhusu {help_sw}?"
             out.append(_turn(dom, roles["sw"] if idx % 2 == 0 else None, g, resp))
 
     # Explicit 2-turn follow-ups (matches Math Q1 -> "Hey" scenario directly)
@@ -202,7 +202,7 @@ def generate_multilingual_domains_v11() -> List[Dict[str, Any]]:
         ("en", "What documents are required to obtain a Supplemental Judgment for birth registration?",
          "### Supplemental Judgment for Birth (**SautiLM-Civ**)\n\nIf **90 days** have passed without registration in DRC:\n1. Apply for a **Jugement supplétif d'acte de naissance** at the local **Tribunal de Paix**.\n2. Bring witness statements (two adult witnesses), medical/baptismal birth proof, and parent IDs.\n3. Transcribe the court judgment at the Civil Status Office to receive an official birth certificate."),
         ("en", "3 key principles of peaceful mediation for neighborhood or land boundaries.",
-         "### Peaceful Mediation Principles (**SautiLM-Civ**)\n\n1. **Neutral Listening :** Let each neighbor present facts and documents calmly before local notables or the Chef de Quartier.\n2. **Transparent Boundary Check :** Inspect landmarks and written land titles jointly on site.\n3. **Signed Conciliation Agreement :** Record mutual commitments in writing to prevent recurring disputes (**Kawa** = Peace)."),
+         "### Peaceful Mediation Principles (**SautiLM-Civ**)\n\n1. **Neutral Listening :** Let each neighbor present facts and documents calmly before local notables or the Chef de Quartier.\n2. **Transparent Boundary Check :** Inspect landmarks and written land titles jointly on site.\n3. **Signed Conciliation Agreement :** Record mutual commitments in writing to prevent recurring disputes."),
         ("fr", "Comment déclarer une naissance à l'État Civil dans le délai légal de 90 jours ?",
          "### Déclaration de Naissance en RDC (**SautiLM-Civ**)\n\n1. **Délai légal :** Tout enfant né en RDC doit être déclaré dans les **90 jours** (Code de la Famille Art. 116).\n2. **Pièces :** Attestation de naissance de la maternité et pièces d'identité des parents.\n3. **Service compétent :** **Officier de l'État Civil** (Commune, Secteur ou Chefferie) — l'acte initial est gratuit."),
         ("sw", "Jinsi ya kusajili cheti cha kuzaliwa cha mtoto katika Ofisi ya Hali ya Raia ndani ya siku 90.",
@@ -239,9 +239,15 @@ def generate_multilingual_domains_v11() -> List[Dict[str, Any]]:
          "### Successions Under the DRC Family Code (**SautiLM-Ius**)\n\n**Legal Basis :** **Article 758 (Law 16/008)** defines three legal categories of heirs:\n1. **1st Category :** Children receive **3/4** of the estate.\n2. **2nd Category :** Surviving spouse, parents, and siblings.\n3. **3rd Category :** Aunts and uncles.\n\nThe surviving spouse holds a **housing usufruct right**, and unlawful eviction (*spoliation*) of widows or orphans is strictly punishable."),
         ("en", "What are the key legal forms of companies under OHADA commercial law in DRC?",
          "### OHADA Commercial Entities in DRC (**SautiLM-Ius**)\n\nUnder the **OHADA Uniform Act on Commercial Companies (AUSCGIE)** applicable in DR Congo, entrepreneurs can form:\n1. **SARL** (Limited Liability Company)\n2. **SA** (Public Limited Company)\n3. **SAS** (Simplified Joint-Stock Company)\n4. **SNC**, **SCS**, and **GIE** registered at the **RCCM** (*Guichet Unique*)."),
+        ("fr", "Que dit l'Article 1 de la Constitution de la RDC ?",
+         "### Article 1 de la Constitution de la RDC (**SautiLM-Ius**)\n\nSelon l'**Article 1 de la Constitution de la République Démocratique du Congo (2006)** :\n1. **État souverain :** La RDC est, dans ses frontières du **30 juin 1960**, un État de droit, indépendant, souverain, uni et indivisible, social, démocratique et laïc.\n2. **Devise et Emblèmes :** Sa devise est **Justice - Paix - Travail**. Son hymne national est le **Débout Congolais**, sa monnaie le **Franc congolais (CDF)**, sa langue officielle le **français**, et ses quatre langues nationales le **kikongo**, le **lingala**, le **swahili** et le **tshiluba**."),
+        ("en", "What does Article 1 of the DRC Constitution state?",
+         "### Article 1 of the DRC Constitution (**SautiLM-Ius**)\n\nUnder **Article 1 of the 2006 DRC Constitution**, the Democratic Republic of the Congo is, within its borders of **June 30, 1960**, an independent, sovereign, united, indivisible, democratic, and secular State of law. Its motto is **Justice - Peace - Work**, its currency is the **Congolese Franc (CDF)**, its official language is **French**, and its four national languages are **Kikongo, Lingala, Kiswahili, and Tshiluba**."),
+        ("sw", "Ibara ya 1 ya Katiba ya RDC inasema nini?",
+         "### Ibara ya 1 ya Katiba ya RDC (**SautiLM-Ius**)\n\nKwa mujibu wa **Ibara ya 1 ya Katiba ya RDC (2006)**, Jamhuri ya Kidemokrasia ya Kongo ni nchi ya kisheria, huru, moja, na ya kidemokrasia katika mipaka yake ya tarehe **30 Juni 1960**. Wito wake ni **Haki - Amani - Kazi**, sarafu ni **Faranga ya Kongo (CDF)**, lugha rasmi ni **Kifaransa**, na lugha nne za kitaifa ni **Kiswahili, Lingala, Kikongo na Tshiluba**."),
     ]
     for lang, q, a in ius_pairs:
-        for rep in range(4):
+        for rep in range(5):
             out.append(_turn("ius", ius_roles[lang] if rep % 2 == 0 else None, q, a))
 
     voice_roles = _make_role_prompts("SautiLM-Voice", "Voice & Pocket Tutor", "Voix & Tuteur Général", "Sauti na Mwalimu Mkuu")
@@ -257,7 +263,7 @@ def generate_multilingual_domains_v11() -> List[Dict[str, Any]]:
     ]
     for lang, q, a in voice_pairs:
         for rep in range(4):
-            out.append(_turn("vision", voice_roles[lang] if rep % 2 == 0 else None, q, a))
+            out.append(_turn("voice", voice_roles[lang] if rep % 2 == 0 else None, q, a))
 
     vision_roles = _make_role_prompts("SautiLM-Vision", "Vision & STEM Quiz", "Vision & Quiz STEM", "Picha na Maswali ya STEM")
     edu_roles = _make_role_prompts("SautiLM-Edu", "Education & Sciences", "Éducation & Sciences", "Elimu na Sayansi")
@@ -274,7 +280,7 @@ def generate_multilingual_domains_v11() -> List[Dict[str, Any]]:
          "### STEM Physics Quiz (**SautiLM-Vision**)\n\n**Question :** According to Ohm's Law (`V = I x R`), if a `12 V` solar battery powers a `4 Ohm` lamp, what is the electric current?\n- **A)** `48 A`\n- **B)** **`3 A`**\n- **C)** `0.33 A`\n\n**Conclusion :** **B** (`I = 12 V / 4 Ohm = 3 A`)."),
         ("edu", edu_roles["en"],
          "How does the water cycle (evaporation, condensation, precipitation) work?",
-         "### The Water Cycle (**SautiLM-Edu**)\n\n1. **Evaporation :** Sunlight warms rivers and lakes (like Lake Albert), turning liquid water (**ddà**) into rising water vapor.\n2. **Condensation :** Cooling vapor high in the air condenses around dust into clouds.\n3. **Precipitation :** Heavy droplets fall back as rain (**ddì**), replenishing soils and streams."),
+         "### The Water Cycle (**SautiLM-Edu**)\n\n1. **Evaporation :** Sunlight warms rivers and lakes, turning liquid water into rising water vapor.\n2. **Condensation :** Cooling vapor high in the air condenses around dust particles into clouds.\n3. **Precipitation :** Heavy droplets fall back as rain, replenishing soils, rivers, and groundwater."),
         ("edu", edu_roles["en"],
          "How do photovoltaic solar cells convert sunlight into electric current?",
          "### Solar PV Working Principle (**SautiLM-Edu**)\n\n1. **Photon Absorption :** Sunlight strikes doped **silicon** semiconductor layers.\n2. **Electron Flow :** Absorbed photons free electrons across the p-n junction, creating **direct current (DC)** voltage for batteries or LED lights."),
@@ -283,7 +289,13 @@ def generate_multilingual_domains_v11() -> List[Dict[str, Any]]:
          "### ORS Rehydration Protocol (**SautiLM-Med**)\n\n1. **Prepare Cleanly :** Wash hands and dissolve 1 full **ORS packet** completely in **1 liter** of clean boiled or treated water.\n2. **Frequent Small Sips :** Give small, regular sips using a cup or spoon (even after mild vomiting).\n3. **Clinical Referral :** Visit a health clinic urgently if the patient cannot drink, becomes lethargic, or has bloody stools."),
         ("med", med_roles["en"],
          "How to purify drinking water safely by boiling or chlorination?",
-         "### Safe Water Purification (**SautiLM-Med**)\n\n1. **Filter First :** Pour water (**ddà**) through a clean folded cloth to remove visible dirt.\n2. **Boil or Chlorinate :** Bring water to a full rolling boil for **1 to 3 minutes**, OR add chlorine drops/tablets and wait **30 minutes**.\n3. **Safe Storage :** Store in a clean covered container."),
+         "### Safe Water Purification (**SautiLM-Med**)\n\n1. **Filter First :** Pour water through a clean folded cloth to remove visible suspended dirt.\n2. **Boil or Chlorinate :** Bring water to a full rolling boil for **1 to 3 minutes**, OR add chlorine drops/tablets and wait **30 minutes**.\n3. **Safe Storage :** Store in a clean covered container."),
+        ("med", med_roles["fr"],
+         "Comment traiter la déshydratation aiguë avec les Sels de Réhydratation Orale (SRO) ?",
+         "### Protocole SRO (**SautiLM-Med**)\n\n1. **Préparation :** Dissoudre 1 sachet complet de **SRO** dans **1 litre** d'eau bouillie refroidie ou chlorée.\n2. **Administration :** Donner de petites gorgées fréquentes à la cuillère ou à la tasse.\n3. **Alerte médicale :** Consulter immédiatement un centre de santé si l'enfant refuse de boire, vomit tout ou présente du sang dans les selles."),
+        ("med", med_roles["fr"],
+         "Quels sont les signes d'alerte du paludisme grave et que faire en urgence ?",
+         "### Prise en Charge Précoce du Paludisme (**SautiLM-Med**)\n\n1. **Signes d'alerte :** Fièvre élevée persistante, convulsions, prostration, vomissements incoercibles ou pâleur sévère.\n2. **Conduite à tenir :** Référer d'urgence vers un centre de santé pour un test **TDR** et un traitement **ACT** ou artésunate injectable, tout en maintenant l'enfant hydraté et sous moustiquaire imprégnée (**MILDA**)."),
     ]
     for dom, role_p, q, a in stem_med_pairs:
         for rep in range(4):

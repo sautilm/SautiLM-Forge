@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,41 @@ ENV_PATH = BASE_DIR / ".env"
 DATA_DIR = BASE_DIR / "data"
 KERNEL_DIR = BASE_DIR / "kaggle_kernel"
 OUTPUT_DIR = BASE_DIR / "kaggle_output"
+
+
+def _target_config(target: str = "jua") -> Dict[str, str]:
+    """Returns Kaggle dataset, kernel, Hugging Face repo, and artifact metadata per SautiLM target."""
+    t = target.strip().lower()
+    if t == "jua":
+        return {
+            "target": "jua",
+            "variant": "sautilm-jua",
+            "model_name": "SautiLM-Jua",
+            "dataset_slug": "sautilm-v1-corpus",
+            "dataset_title": "SautiLM-Jua Clean Multilingual & Domain Corpus",
+            "kernel_slug": "sautilm-v1-forge-gpu",
+            "kernel_title": "SautiLM-Jua Forge GPU",
+            "hf_repo": "SautiLM-Jua",
+            "jsonl_filename": "sautilm_v1_train.jsonl",
+            "stats_filename": "corpus_stats.json",
+            "litertlm_filename": "sautilm-jua.litertlm",
+            "adapter_dirname": "sautilm_jua_lora_adapter",
+        }
+    suffix = t.upper() if t == "stem" else t.capitalize()
+    return {
+        "target": t,
+        "variant": f"sautilm-jua-{t}",
+        "model_name": f"SautiLM-Jua-{suffix}",
+        "dataset_slug": f"sautilm-jua-{t}-corpus",
+        "dataset_title": f"SautiLM-Jua-{suffix} Standalone Domain Corpus",
+        "kernel_slug": f"sautilm-jua-{t}-forge",
+        "kernel_title": f"SautiLM-Jua-{suffix} Forge GPU",
+        "hf_repo": f"SautiLM-Jua-{suffix}",
+        "jsonl_filename": f"sautilm_jua_{t}_train.jsonl",
+        "stats_filename": f"corpus_stats_{t}.json",
+        "litertlm_filename": f"sautilm-jua-{t}.litertlm",
+        "adapter_dirname": f"sautilm_jua_{t}_lora_adapter",
+    }
 
 
 def _load_local_auth() -> Dict[str, str]:
@@ -34,8 +70,16 @@ def _load_local_auth() -> Dict[str, str]:
     }
 
 
-def publish_dataset_to_kaggle(skip_if_exists: bool = False) -> str:
-    """Uploads the latest SautiLM Jua corpus as a private Kaggle dataset."""
+def publish_dataset_to_kaggle(skip_if_exists: bool = False, target: str = "jua") -> str:
+    """Uploads the requested SautiLM target corpus as a private Kaggle dataset."""
+    cfg = _target_config(target)
+    jsonl_src = DATA_DIR / cfg["jsonl_filename"]
+    stats_src = DATA_DIR / cfg["stats_filename"]
+    if not jsonl_src.exists() or not stats_src.exists():
+        from .corpus_builder import build_target_corpus
+
+        build_target_corpus(cfg["target"], DATA_DIR)
+
     auth = _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
 
@@ -43,25 +87,38 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = False) -> str:
     api.authenticate()
 
     kaggle_user = auth["kaggle_user"]
-    dataset_slug = "sautilm-v1-corpus"
-    dataset_ref = f"{kaggle_user}/{dataset_slug}"
+    dataset_ref = f"{kaggle_user}/{cfg['dataset_slug']}"
 
     existing = [d.ref for d in api.dataset_list(mine=True)]
     if dataset_ref in existing and skip_if_exists:
         print(f"[SautiLM-Forge] Private Kaggle dataset already exists: {dataset_ref}")
         return dataset_ref
 
-    staging_dir = BASE_DIR / "build" / "kaggle_dataset"
+    staging_dir = BASE_DIR / "build" / f"kaggle_dataset_{cfg['target']}"
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(DATA_DIR / "sautilm_v1_train.jsonl", staging_dir / "sautilm_v1_train.jsonl")
-    shutil.copy2(DATA_DIR / "bbadha_full_lexicon.json", staging_dir / "bbadha_full_lexicon.json")
-    shutil.copy2(DATA_DIR / "corpus_stats.json", staging_dir / "corpus_stats.json")
+    shutil.copy2(jsonl_src, staging_dir / cfg["jsonl_filename"])
+    shutil.copy2(stats_src, staging_dir / cfg["stats_filename"])
+    if cfg["target"] in ("jua", "lex") and (DATA_DIR / "bbadha_full_lexicon.json").exists():
+        shutil.copy2(DATA_DIR / "bbadha_full_lexicon.json", staging_dir / "bbadha_full_lexicon.json")
+
+    with open(staging_dir / "build_target.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "target": cfg["target"],
+                "variant": cfg["variant"],
+                "model_name": cfg["model_name"],
+                "jsonl_filename": cfg["jsonl_filename"],
+                "litertlm_filename": cfg["litertlm_filename"],
+            },
+            f,
+            indent=2,
+        )
 
     metadata = {
-        "title": "SautiLM v1 Trilingual & Domain Corpus",
+        "title": cfg["dataset_title"],
         "id": dataset_ref,
         "licenses": [{"name": "CC0-1.0"}],
     }
@@ -72,7 +129,7 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = False) -> str:
         print(f"[SautiLM-Forge] Updating existing private Kaggle dataset: {dataset_ref}")
         api.dataset_create_version(
             str(staging_dir),
-            version_notes="Update SautiLM Jua masked-SFT corpus (no fake vision tags, Role attribution)",
+            version_notes=f"Update {cfg['model_name']} modular zero-leakage SFT corpus",
             quiet=False,
             convert_to_csv=False,
             dir_mode="zip",
@@ -90,8 +147,9 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = False) -> str:
     return dataset_ref
 
 
-def push_gpu_kernel_to_kaggle(dataset_ref: str) -> str:
-    """Pushes the GPU fine-tuning and <=150MB LiteRT-LM export kernel to Kaggle."""
+def push_gpu_kernel_to_kaggle(dataset_ref: str, target: str = "jua") -> str:
+    """Pushes the GPU fine-tuning and LiteRT-LM export kernel to Kaggle for the given target."""
+    cfg = _target_config(target)
     auth = _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
 
@@ -99,12 +157,11 @@ def push_gpu_kernel_to_kaggle(dataset_ref: str) -> str:
     api.authenticate()
 
     kaggle_user = auth["kaggle_user"]
-    kernel_slug = "sautilm-v1-forge-gpu"
-    kernel_ref = f"{kaggle_user}/{kernel_slug}"
+    kernel_ref = f"{kaggle_user}/{cfg['kernel_slug']}"
 
     kernel_meta = {
         "id": kernel_ref,
-        "title": "SautiLM v1 Forge GPU",
+        "title": cfg["kernel_title"],
         "code_file": "train_and_export.py",
         "language": "python",
         "kernel_type": "script",
@@ -126,10 +183,11 @@ def push_gpu_kernel_to_kaggle(dataset_ref: str) -> str:
     return kernel_ref
 
 
-def build_hf_model_card(metrics: Dict[str, Any] | None = None) -> str:
-    """Builds the official Hugging Face Model Card for sautilm/SautiLM-Jua."""
-    stats_file = DATA_DIR / "corpus_stats.json"
-    corpus_total = 22895
+def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "jua") -> str:
+    """Builds the official Hugging Face Model Card for sautilm/SautiLM-Jua or a standalone specialty."""
+    cfg = _target_config(target)
+    stats_file = DATA_DIR / cfg["stats_filename"]
+    corpus_total = 23500 if cfg["target"] == "jua" else 260
     lex_count = 1150
     if stats_file.exists():
         try:
@@ -142,8 +200,8 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None) -> str:
 
     size_mb = metrics.get("litertlm_size_mb", "Pending build") if metrics else "Pending build"
     quant_recipe = metrics.get("quantization_recipe", "dynamic_wi8_afp32") if metrics else "dynamic_wi8_afp32"
-    lora_r = metrics.get("lora_r", 32) if metrics else 32
-    lora_alpha = metrics.get("lora_alpha", 64) if metrics else 64
+    lora_r = metrics.get("lora_r", 16) if metrics else 16
+    lora_alpha = metrics.get("lora_alpha", 32) if metrics else 32
     quality_score = metrics.get("litertlm_quality_score", "Pending") if metrics else "Pending"
     final_loss = f"{metrics['final_loss']:.4f}" if (metrics and metrics.get("final_loss") is not None) else "Pending"
     steps = metrics.get("steps", "Pending") if metrics else "Pending"
@@ -154,14 +212,14 @@ license: gemma
 base_model: google/gemma-3-270m-it
 library_name: litert-lm
 language:
-- sw
 - fr
 - en
+- sw
 tags:
 - sautilm
+- sautilm-jua
+- {cfg['variant']}
 - bbadha
-- kilendu
-- swahili
 - drc
 - edge-ai
 - litertlm
@@ -170,35 +228,26 @@ tags:
 pipeline_tag: text-generation
 ---
 
-# SautiLM Jua (Offline Edge-AI Foundation Model - {size_mb} MB)
+# {cfg['model_name']} (Offline Edge-AI Model - {size_mb} MB)
 
-**SautiLM Jua** (*Jua* = "The Sun" & "To Know" in Swahili/Kingwana) is the first 100% offline Edge-AI foundation model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
+**{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
 
-Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nuru**, **Wazo**, **Moto**, **Kuu**, **Mali**), **SautiLM Jua** is specialized from **Google Gemma 3 (`270M-IT`)** using masked-loss LoRA Supervised Fine-Tuning (SFT) on **{corpus_total:,} verified instructions** and compiled with Google's official `litert-torch` + `ai-edge-quantizer` (`{quant_recipe}`) into native `.litertlm` container format (`sautilm-jua.litertlm`, **{size_mb} MB**), executing natively on Android smartphones with zero internet connection.
+Built directly on **Google Gemma 3 (`270M-IT`)** with masked-loss LoRA Supervised Fine-Tuning (SFT) on **{corpus_total:,} verified zero-leakage instructions** and compiled with Google's official `litert-torch` (`{quant_recipe}`) into native `.litertlm` container format (`{cfg['litertlm_filename']}`, **{size_mb} MB**), executing natively on Android smartphones via LiteRT-LM with zero internet connection.
 
 ---
 
-## SautiLM Foundation Series & 10 Specialized Domain Modules
+## SautiLM-Jua Modular Architecture (Strictly Separated Specialties)
 
-### Foundation Model Series (3-4 Letter Swahili / Kingwana Names)
-- **SautiLM Jua** (*Sun / Knowledge*) : Edge-AI foundation model (`{size_mb} MB`, Active - {verified_badge})
-- **SautiLM Nuru** (*Light / Clarity*) : Mid-sized multimodal & vision model (In development)
-- **SautiLM Wazo** (*Thought / Deep Reasoning*) : Analytical model for law, STEM, and research (In development)
-- **SautiLM Moto** (*Fire / High Speed*) : Ultra-low-latency streaming and voice model (In development)
-- **SautiLM Kuu** (*Supreme / Flagship*) : Full-scale institutional model for universities, courts, and hospitals (In development)
-- **SautiLM Mali** (*Heritage / Treasure*) : Sovereign linguistic and cultural corpus foundation (In development)
-
-### 10 Specialized Domain Modules Powered by SautiLM Jua
-1. **SautiLM-Lex (Lexicography & Translation)** : Grounded in **{lex_count:,} verified Bbadha (Kilendu) dictionary entries**, phonetics, grammatical classes, and trilingual examples (**Bbadha - Kiswahili - French/English**).
-2. **SautiLM-Edu (Education & General Sciences)** : Curriculum-aligned explanations in biology, physics, environmental science, and general knowledge.
-3. **SautiLM-Math (Mathematics & Quantitative Logic)** : Verified arithmetic, percentages, algebra, and commercial calculations.
-4. **SautiLM-Med (Public Health & Medical Triage)** : Actionable protocols for water sanitation (`Dda`), oral rehydration (ORS), cholera/malaria prevention (`Rra`), and nutrition (`Zzà`).
-5. **SautiLM-Ius (Congolese Law & Justice)** : Grounded in the **Constitution of the DRC**, the **revised Family Code (Loi n° 16/008)**, the **Penal Code**, the **Labor Code**, and **OHADA Law**.
-6. **SautiLM-Vision (OCR Text & Symptom Analysis)** : Offline solving of transcribed chalkboard exercises and symptom-based crop diagnostics (direct image pixel encoding reserved for **SautiLM Nuru**).
-7. **SautiLM-Voice (Phonetics & Orality)** : Tonal pronunciation guidance and speech interface for Eastern DRC languages.
-8. **SautiLM-Agri (Agronomy & Crop Protection)** : Field diagnosis for cassava mosaic, maize rust, coffee wilt, composting, and soil conservation.
-9. **SautiLM-Fin (Finance, SME Accounting & AVEC)** : Cooperative accounting, village savings (VSLA/AVEC), and FC/USD trade calculations.
-10. **SautiLM-Civ (Civic Administration & Mediation)** : Civil status registration (`Acte de naissance`), public services, and peaceful community mediation (`Kawa`).
+- **SautiLM-Jua** : Clean multi-domain offline foundation model (`sautilm-jua.litertlm`)
+- **SautiLM-Jua-STEM** : Secondary School & DRC Examen d'État STEM (60% French / 40% English; Maths, Physics, Chemistry, Biology; partner integration: Andaa Edge)
+- **SautiLM-Jua-Lex** : Bbadha (Kilendu), Kiswahili, French & English lexicography (**{lex_count:,} verified dictionary entries**)
+- **SautiLM-Jua-Med** : Community public health & medical protocols (partner integration: AfyaSpeak)
+- **SautiLM-Jua-Agri** : Agronomy & crop protection (partner integration: Gemmea)
+- **SautiLM-Jua-Ius** : Congolese Law (DRC Constitution, Family Code, Penal Code, Labor Code, OHADA)
+- **SautiLM-Jua-Fin** : Cooperative finance, SME accounting & AVEC microfinance
+- **SautiLM-Jua-Civ** : Civil status administration & peaceful community mediation
+- **SautiLM-Jua-Vision** : Offline OCR chalkboard text solving (pixel vision reserved for **SautiLM-Nuru**)
+- **SautiLM-Jua-Voice** : Tonal phonetics & voice assistant companion
 
 ---
 
@@ -206,11 +255,11 @@ Part of the SautiLM short-name Swahili/Kingwana foundation series (**Jua**, **Nu
 
 | Specification | Value |
 | :--- | :--- |
-| **Model Identifier** | `sautilm/SautiLM-Jua` |
-| **Primary Mobile Bundle** | `sautilm-jua.litertlm` ({size_mb} MB) |
+| **Model Identifier** | `sautilm/{cfg['hf_repo']}` |
+| **Mobile Bundle** | `{cfg['litertlm_filename']}` ({size_mb} MB) |
 | **Quantization / Export** | `litert-torch` (`{quant_recipe}`, TFLite FlatBuffer Prefill/Decode + HF Tokenizer) |
 | **Parent Architecture** | Google Gemma 3 (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`, `cache_length=2048`) |
-| **Training Corpus** | {corpus_total:,} instructions ({lex_count:,} Bbadha lexicon entries + Math + Edu + Med + Congolese Law + OCR/Text Vision) |
+| **Training Corpus** | {corpus_total:,} clean instructions |
 | **Training Steps / Final Loss** | {steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`, response-only loss masking) / Final Loss: `{final_loss}` |
 | **Runtime Verification** | {verified_badge} |
 | **Target Mobile Runtime** | Flutter (`flutter_edge_ai` + `flutter_edge_ai_litertlm`) |
@@ -229,26 +278,33 @@ Engineered & Supported by [LosingTek](https://losingtek.com)
 """
 
 
-def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
-    """Initializes https://huggingface.co/sautilm/SautiLM-Jua and uploads model artifacts."""
+def _output_dir_for_target(target: str) -> Path:
+    t = target.strip().lower()
+    return OUTPUT_DIR if t == "jua" else (OUTPUT_DIR / t)
+
+
+def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") -> str:
+    """Initializes https://huggingface.co/sautilm/<hf_repo> and uploads model artifacts."""
+    cfg = _target_config(target)
     auth = _load_local_auth()
     hf_api = HfApi(token=auth["hf_token"])
     user_info = hf_api.whoami()
     hf_owner = user_info.get("name", "sautilm")
-    repo_id = f"{hf_owner}/SautiLM-Jua"
+    repo_id = f"{hf_owner}/{cfg['hf_repo']}"
 
     create_repo(repo_id=repo_id, token=auth["hf_token"], repo_type="model", exist_ok=True, private=False)
     print(f"[SautiLM-Forge] Hugging Face repository ready: https://huggingface.co/{repo_id}")
 
+    out_dir = _output_dir_for_target(cfg["target"])
     metrics = None
-    metrics_file = OUTPUT_DIR / "training_metrics.json"
+    metrics_file = out_dir / "training_metrics.json"
     if metrics_file.exists():
         with open(metrics_file, "r", encoding="utf-8") as f:
             metrics = json.load(f)
 
-    readme_path = BASE_DIR / "build" / "HF_README.md"
+    readme_path = BASE_DIR / "build" / f"HF_README_{cfg['target']}.md"
     readme_path.parent.mkdir(parents=True, exist_ok=True)
-    readme_path.write_text(build_hf_model_card(metrics), encoding="utf-8")
+    readme_path.write_text(build_hf_model_card(metrics, target=cfg["target"]), encoding="utf-8")
 
     hf_api.upload_file(
         path_or_fileobj=str(readme_path),
@@ -256,37 +312,40 @@ def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
         repo_id=repo_id,
         repo_type="model",
     )
-    hf_api.upload_file(
-        path_or_fileobj=str(DATA_DIR / "corpus_stats.json"),
-        path_in_repo="corpus_stats.json",
-        repo_id=repo_id,
-        repo_type="model",
-    )
+    stats_file = DATA_DIR / cfg["stats_filename"]
+    if stats_file.exists():
+        hf_api.upload_file(
+            path_or_fileobj=str(stats_file),
+            path_in_repo=cfg["stats_filename"],
+            repo_id=repo_id,
+            repo_type="model",
+        )
 
-    if include_outputs and OUTPUT_DIR.exists():
+    if include_outputs and out_dir.exists():
         if not (metrics and metrics.get("litertlm_verified")):
             raise RuntimeError(
                 "Refusing to upload unverified .litertlm artifacts to Hugging Face! "
                 "Ensure training_metrics.json confirms litertlm_verified=True."
             )
-        litertlm_file = OUTPUT_DIR / "sautilm-jua.litertlm"
+        litertlm_file = out_dir / cfg["litertlm_filename"]
+        if not litertlm_file.exists() and cfg["target"] == "jua":
+            litertlm_file = out_dir / "sautilm-v1.litertlm"
         if not litertlm_file.exists():
-            litertlm_file = OUTPUT_DIR / "sautilm-v1.litertlm"
-        if not litertlm_file.exists():
-            raise FileNotFoundError(f"No verified .litertlm bundle found in {OUTPUT_DIR}")
+            raise FileNotFoundError(f"No verified .litertlm bundle found in {out_dir}")
         print(f"[SautiLM-Forge] Uploading verified {litertlm_file.name} to {repo_id}...")
         hf_api.upload_file(
             path_or_fileobj=str(litertlm_file),
-            path_in_repo="sautilm-jua.litertlm",
+            path_in_repo=cfg["litertlm_filename"],
             repo_id=repo_id,
             repo_type="model",
         )
-        hf_api.upload_file(
-            path_or_fileobj=str(litertlm_file),
-            path_in_repo="sautilm-v1.litertlm",
-            repo_id=repo_id,
-            repo_type="model",
-        )
+        if cfg["target"] == "jua":
+            hf_api.upload_file(
+                path_or_fileobj=str(litertlm_file),
+                path_in_repo="sautilm-v1.litertlm",
+                repo_id=repo_id,
+                repo_type="model",
+            )
         if metrics_file.exists():
             hf_api.upload_file(
                 path_or_fileobj=str(metrics_file),
@@ -294,7 +353,9 @@ def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
                 repo_id=repo_id,
                 repo_type="model",
             )
-        adapter_dir = OUTPUT_DIR / "sautilm_v1_lora_adapter"
+        adapter_dir = out_dir / cfg["adapter_dirname"]
+        if not adapter_dir.exists() and cfg["target"] == "jua":
+            adapter_dir = out_dir / "sautilm_v1_lora_adapter"
         if adapter_dir.exists():
             hf_api.upload_folder(
                 folder_path=str(adapter_dir),
@@ -306,8 +367,9 @@ def init_and_upload_hf_repo(include_outputs: bool = False) -> str:
     return f"https://huggingface.co/{repo_id}"
 
 
-def check_or_download_kaggle_kernel(kernel_ref: str) -> Dict[str, Any]:
+def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dict[str, Any]:
     """Checks the status of the Kaggle GPU kernel and downloads outputs if complete."""
+    cfg = _target_config(target)
     _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
 
@@ -319,41 +381,47 @@ def check_or_download_kaggle_kernel(kernel_ref: str) -> Dict[str, Any]:
 
     result = {
         "kernel_ref": kernel_ref,
+        "target": cfg["target"],
         "status": status_str,
         "failure_message": failure_msg,
     }
     if "complete" in status_str.lower():
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        # Clear stale prior artifacts before downloading fresh run outputs
-        for old_name in ("sautilm-v1.litertlm", "sautilm-jua.litertlm", "training_metrics.json"):
-            old_path = OUTPUT_DIR / old_name
+        out_dir = _output_dir_for_target(cfg["target"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for old_name in (cfg["litertlm_filename"], "sautilm-v1.litertlm", "training_metrics.json"):
+            old_path = out_dir / old_name
             if old_path.exists():
                 old_path.unlink()
+        escaped_litert = cfg["litertlm_filename"].replace(".", r"\.")
+        escaped_adapter = cfg["adapter_dirname"]
         api.kernels_output(
             kernel_ref,
-            path=str(OUTPUT_DIR),
-            file_pattern=r"^(sautilm-jua\.litertlm|sautilm-v1\.litertlm|training_metrics\.json|sautilm_v1_lora_adapter/.*)$",
+            path=str(out_dir),
+            file_pattern=rf"^({escaped_litert}|sautilm-jua\.litertlm|sautilm-v1\.litertlm|training_metrics\.json|{escaped_adapter}/.*|sautilm_v1_lora_adapter/.*)$",
             quiet=False,
         )
-        result["downloaded_to"] = str(OUTPUT_DIR)
+        result["downloaded_to"] = str(out_dir)
     return result
 
 
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(description="Orchestrate modular SautiLM Kaggle training & Hugging Face uploads.")
+    parser.add_argument("action", nargs="?", default="launch", choices=("launch", "status", "upload"))
+    parser.add_argument("--target", default="jua", help="Target build ('jua' or specialty e.g. 'stem').")
+    cli_args = parser.parse_args()
 
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "launch"
-    if cmd == "launch":
-        ds_ref = publish_dataset_to_kaggle(skip_if_exists=False)
+    cfg = _target_config(cli_args.target)
+    if cli_args.action == "launch":
+        ds_ref = publish_dataset_to_kaggle(skip_if_exists=False, target=cfg["target"])
         print("Waiting 15s for Kaggle dataset indexing...")
         time.sleep(15)
-        k_ref = push_gpu_kernel_to_kaggle(ds_ref)
-        print(json.dumps({"dataset": ds_ref, "kernel": k_ref}, indent=2))
-    elif cmd == "status":
+        k_ref = push_gpu_kernel_to_kaggle(ds_ref, target=cfg["target"])
+        print(json.dumps({"target": cfg["target"], "dataset": ds_ref, "kernel": k_ref}, indent=2))
+    elif cli_args.action == "status":
         auth = _load_local_auth()
-        k_ref = f"{auth['kaggle_user']}/sautilm-v1-forge-gpu"
-        info = check_or_download_kaggle_kernel(k_ref)
+        k_ref = f"{auth['kaggle_user']}/{cfg['kernel_slug']}"
+        info = check_or_download_kaggle_kernel(k_ref, target=cfg["target"])
         print(json.dumps(info, indent=2))
-    elif cmd == "upload":
-        hf_url = init_and_upload_hf_repo(include_outputs=True)
-        print(json.dumps({"hf_url": hf_url}, indent=2))
+    elif cli_args.action == "upload":
+        hf_url = init_and_upload_hf_repo(include_outputs=True, target=cfg["target"])
+        print(json.dumps({"target": cfg["target"], "hf_url": hf_url}, indent=2))

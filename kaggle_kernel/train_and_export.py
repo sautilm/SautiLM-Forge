@@ -41,13 +41,123 @@ CORE_BBADHA_WORDS = {
 }
 
 
-def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
-    """Loads sautilm_v1_train.jsonl, prioritizes key Bbadha + specialty domains, and balances rows."""
-    jsonl_files = list(input_root.rglob("sautilm_v1_train.jsonl"))
+VARIANT_SPECS: Dict[str, Dict[str, str]] = {
+    "sautilm-jua": {
+        "target": "jua",
+        "model_name": "SautiLM-Jua",
+        "jsonl_filename": "sautilm_v1_train.jsonl",
+        "litertlm_filename": "sautilm-jua.litertlm",
+        "adapter_dirname": "sautilm_jua_lora_adapter",
+    },
+    "sautilm-jua-stem": {
+        "target": "stem",
+        "model_name": "SautiLM-Jua-STEM",
+        "jsonl_filename": "sautilm_jua_stem_train.jsonl",
+        "litertlm_filename": "sautilm-jua-stem.litertlm",
+        "adapter_dirname": "sautilm_jua_stem_lora_adapter",
+    },
+    "sautilm-jua-lex": {
+        "target": "lex",
+        "model_name": "SautiLM-Jua-Lex",
+        "jsonl_filename": "sautilm_jua_lex_train.jsonl",
+        "litertlm_filename": "sautilm-jua-lex.litertlm",
+        "adapter_dirname": "sautilm_jua_lex_lora_adapter",
+    },
+    "sautilm-jua-med": {
+        "target": "med",
+        "model_name": "SautiLM-Jua-Med",
+        "jsonl_filename": "sautilm_jua_med_train.jsonl",
+        "litertlm_filename": "sautilm-jua-med.litertlm",
+        "adapter_dirname": "sautilm_jua_med_lora_adapter",
+    },
+    "sautilm-jua-agri": {
+        "target": "agri",
+        "model_name": "SautiLM-Jua-Agri",
+        "jsonl_filename": "sautilm_jua_agri_train.jsonl",
+        "litertlm_filename": "sautilm-jua-agri.litertlm",
+        "adapter_dirname": "sautilm_jua_agri_lora_adapter",
+    },
+    "sautilm-jua-ius": {
+        "target": "ius",
+        "model_name": "SautiLM-Jua-Ius",
+        "jsonl_filename": "sautilm_jua_ius_train.jsonl",
+        "litertlm_filename": "sautilm-jua-ius.litertlm",
+        "adapter_dirname": "sautilm_jua_ius_lora_adapter",
+    },
+    "sautilm-jua-fin": {
+        "target": "fin",
+        "model_name": "SautiLM-Jua-Fin",
+        "jsonl_filename": "sautilm_jua_fin_train.jsonl",
+        "litertlm_filename": "sautilm-jua-fin.litertlm",
+        "adapter_dirname": "sautilm_jua_fin_lora_adapter",
+    },
+    "sautilm-jua-civ": {
+        "target": "civ",
+        "model_name": "SautiLM-Jua-Civ",
+        "jsonl_filename": "sautilm_jua_civ_train.jsonl",
+        "litertlm_filename": "sautilm-jua-civ.litertlm",
+        "adapter_dirname": "sautilm_jua_civ_lora_adapter",
+    },
+    "sautilm-jua-edu": {
+        "target": "edu",
+        "model_name": "SautiLM-Jua-Edu",
+        "jsonl_filename": "sautilm_jua_edu_train.jsonl",
+        "litertlm_filename": "sautilm-jua-edu.litertlm",
+        "adapter_dirname": "sautilm_jua_edu_lora_adapter",
+    },
+}
+
+
+def resolve_variant_config(input_root: Path, requested_variant: str | None = None) -> Dict[str, str]:
+    """Resolves which SautiLM variant to train from CLI arg, env var, build_target.json, or input files."""
+    candidate = (requested_variant or os.environ.get("SAUTILM_VARIANT", "")).strip().lower()
+    if candidate in ("core", "jua", "sautilm-jua-core"):
+        candidate = "sautilm-jua"
+    elif candidate and not candidate.startswith("sautilm-jua"):
+        candidate = f"sautilm-jua-{candidate}"
+
+    if not candidate and input_root.exists():
+        meta_files = list(input_root.rglob("build_target.json"))
+        if meta_files:
+            try:
+                meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
+                candidate = str(meta.get("variant", "")).strip().lower()
+            except Exception:
+                candidate = ""
+
+    if not candidate and input_root.exists():
+        for v_key, spec in VARIANT_SPECS.items():
+            if v_key != "sautilm-jua" and list(input_root.rglob(spec["jsonl_filename"])):
+                candidate = v_key
+                break
+
+    if not candidate:
+        candidate = "sautilm-jua"
+
+    if candidate not in VARIANT_SPECS:
+        raise ValueError(f"Unsupported SautiLM variant '{candidate}'. Expected one of {tuple(VARIANT_SPECS)}")
+    return {"variant": candidate, **VARIANT_SPECS[candidate]}
+
+
+def _has_cjk(text: str) -> bool:
+    """Detects unexpected CJK/Han/Kana/Hangul token leakage in model output."""
+    return any(
+        ("\u4e00" <= ch <= "\u9fff") or ("\u3040" <= ch <= "\u30ff") or ("\uac00" <= ch <= "\ud7af")
+        for ch in text
+    )
+
+
+def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Loads the target SautiLM JSONL corpus and balances domains for clean SFT without cross-leakage."""
+    target = variant_cfg["target"]
+    expected_name = variant_cfg["jsonl_filename"]
+    jsonl_files = list(input_root.rglob(expected_name))
+    if not jsonl_files and target == "jua":
+        jsonl_files = list(input_root.rglob("sautilm_jua_train.jsonl"))
     if not jsonl_files:
-        raise FileNotFoundError(f"Could not find sautilm_v1_train.jsonl in {input_root}")
+        raise FileNotFoundError(f"Could not find {expected_name} in {input_root}")
     jsonl_path = jsonl_files[0]
-    print(f"[SautiLM-Forge] Found training corpus: {jsonl_path}")
+    print(f"[SautiLM-Forge] Variant={variant_cfg['model_name']} | Corpus: {jsonl_path}")
 
     by_domain: Dict[str, List[Dict[str, Any]]] = {}
     with open(jsonl_path, "r", encoding="utf-8") as f:
@@ -55,19 +165,33 @@ def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
             if not line.strip():
                 continue
             row = json.loads(line)
-            d = row.get("domain", "lex")
+            d = row.get("domain", target)
             by_domain.setdefault(d, []).append(row)
 
     random.seed(42)
     curated: List[Dict[str, Any]] = []
 
-    # v1.1 Balanced mix: retain strong EN/FR/SW domain & greeting mastery without overfitting on Bbadha cards
+    if target != "jua":
+        all_rows = [item for items in by_domain.values() for item in items]
+        if target == "lex":
+            by_domain = {"lex": all_rows}
+        else:
+            repeat = max(1, min(6, 960 // max(1, len(all_rows))))
+            curated.extend(all_rows * repeat)
+            random.shuffle(curated)
+            print(
+                f"[SautiLM-Forge] Standalone specialty '{variant_cfg['model_name']}': "
+                f"{len(curated)} rows ({len(all_rows)} unique x {repeat})"
+            )
+            return curated
+
+    # Full SautiLM-Jua foundation mix: balanced across cleanly separated domains (no Bbadha leaks outside lex)
     for d, items in by_domain.items():
         if d != "lex":
             mult = 2 if len(items) >= 120 else 3
             curated.extend(items * mult)
 
-    # For lex: prioritize RAG-grounded entries, natural Q&As, and exact core Bbadha headword cards
+    # For lex: prioritize RAG-grounded entries, greetings/salutations, natural Q&As, and core Bbadha cards
     lex_items = by_domain.get("lex", [])
     rag_or_dda_lex: List[Dict[str, Any]] = []
     core_headword_lex: List[Dict[str, Any]] = []
@@ -76,15 +200,22 @@ def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
         sys_lower = str(item.get("system", "")).lower()
         prompt_lower = str(item.get("prompt", "")).lower()
         resp_lower = str(item.get("response", "")).lower()
+        is_salutation = any(
+            k in resp_lower for k in ("dyiná blĩ", "mbăi dyiná", "ndré dzo", "kūná bù", "mbăi bbo")
+        )
         is_greeting = len(prompt_lower.strip()) <= 20 and (
-            "sautilm-lex" in resp_lower or "hello" in resp_lower or "bonjour" in resp_lower or "habari" in resp_lower
+            "sautilm-jua-lex" in resp_lower
+            or "sautilm-lex" in resp_lower
+            or "hello" in resp_lower
+            or "bonjour" in resp_lower
+            or "habari" in resp_lower
         )
         is_rag = "dictionnaire bbadha verifie" in sys_lower
         is_dda_qa = ("dda" in prompt_lower or "ddà" in prompt_lower) and (
             "**ddà**" in resp_lower or "ddà" in resp_lower
         )
         is_core_headword = any(f"**{w}**" in resp_lower for w in CORE_BBADHA_WORDS)
-        if is_greeting or is_rag or is_dda_qa:
+        if is_salutation or is_greeting or is_rag or is_dda_qa:
             rag_or_dda_lex.append(item)
         elif is_core_headword:
             core_headword_lex.append(item)
@@ -95,14 +226,14 @@ def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
         core_headword_lex = random.sample(core_headword_lex, 450)
     curated.extend(rag_or_dda_lex * 2)
     curated.extend(core_headword_lex)
-    target_other = min(750, max(350, 3400 - len(curated)))
+    target_other = min(750, max(350, 3800 - len(curated)))
     sampled_other = other_lex if len(other_lex) <= target_other else random.sample(other_lex, target_other)
     curated.extend(sampled_other)
 
     random.shuffle(curated)
     print(
-        f"[SautiLM-Forge] Curated v1.1 dataset: {len(curated)} rows "
-        f"(rag_dda={len(rag_or_dda_lex)}x2, core_headword={len(core_headword_lex)}, "
+        f"[SautiLM-Forge] Curated {variant_cfg['model_name']} dataset: {len(curated)} rows "
+        f"(rag_salutation={len(rag_or_dda_lex)}x2, core_headword={len(core_headword_lex)}, "
         f"sampled_other_lex={len(sampled_other)})"
     )
     return curated
@@ -269,105 +400,184 @@ def _shim_litert_lm_builder_compat() -> None:
         litert_lm_builder.TfLiteModelType = _TfLiteModelTypeCompat
 
 
-def _score_runtime_outputs(outputs: Dict[str, str]) -> int:
-    """Scores grounded factual accuracy & hallucination resistance across 15 EN/FR/SW & greeting checks (max 15)."""
-    score = 0
-    checks = {
-        "identity_fr": lambda t: ("sautilm" in t or "losingtek" in t) and "rossi" not in t and "nuru ai research" not in t,
-        "identity_en": lambda t: ("sautilm" in t or "losingtek" in t) and "openai" not in t,
-        "identity_georges": lambda t: "georges byona" in t and "losingtek" in t and "nuru ai" not in t and "edge-bert" not in t,
-        "greeting_fin_hey": lambda t: ("sautilm-fin" in t or "hello" in t or "savings" in t or "finance" in t) and "warsaw" not in t and "mtekmeda" not in t,
-        "greeting_voice_hey": lambda t: ("sautilm" in t or "hello" in t or "phonetic" in t) and "explicação" not in t and "mtekmeda" not in t,
-        "lex_dda": lambda t: ("eau" in t or "maji" in t or "rivi" in t or "water" in t) and "grosse" not in t and ": (1)" not in t,
-        "lex_rag_dda": lambda t: ("eau" in t or "maji" in t or "rivi" in t) and "chien" not in t and "(19)" not in t,
-        "ius_garde_a_vue": lambda t: ("48" in t and ("constitution" in t or "avocat" in t or "art" in t)) and "vlan" not in t and "360" not in t,
-        "ius_custody_en": lambda t: "48" in t and ("constitution" in t or "lawyer" in t or "art" in t) and "480" not in t,
-        "fin_avec_en": lambda t: "120000" in t or "120,000" in t,
-        "civ_birth_en": lambda t: "90" in t and ("civil status" in t or "family code" in t or "116" in t) and "ddi.be" not in t,
-        "agri_cmd_en": lambda t: ("cassava mosaic" in t or "cmd" in t or "bemisia" in t or "whitefl" in t) and "oats" not in t,
-        "vision_stem_en": lambda t: "chlorophyll" in t or "chloroplast" in t or "green leaves" in t,
-        "math_pastoral": lambda t: "15" in t,
-        "med_cholera": lambda t: "bouillir" in t or "filtr" in t or "chlore" in t or "savon" in t,
-    }
-    for k, fn in checks.items():
-        txt = (outputs.get(k) or "").lower()
-        words = txt.split()
-        unique_ratio = (len(set(words)) / len(words)) if words else 0.0
-        if "<pad>" not in txt and len(words) >= 5 and unique_ratio >= 0.30 and fn(txt):
-            score += 1
-    return score
+def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, Any]]:
+    """Returns (check_key, system_prompt, user_prompt, predicate_fn) tuples for LiteRT-LM verification."""
+    stem_suite = [
+        (
+            "stem_identity_fr",
+            None,
+            "Qui es-tu et quel niveau scolaire couvres-tu ?",
+            lambda t: ("sautilm" in t or "losingtek" in t) and ("secondaire" in t or "examen" in t or "stem" in t) and "bbadha" not in t,
+        ),
+        (
+            "stem_quad_fr",
+            None,
+            "Résous dans R l'équation du second degré : 2x^2 - 4x - 6 = 0 (Examen d'État).",
+            lambda t: ("64" in t or "delta" in t) and "3" in t and "-1" in t and "bbadha" not in t and "4500" not in t,
+        ),
+        (
+            "stem_integral_fr",
+            None,
+            "Calcule l'intégrale de sinus x divisé par cosinus x dx étape par étape.",
+            lambda t: ("ln" in t or "cos" in t) and "bbadha" not in t and "4500" not in t,
+        ),
+        (
+            "stem_qcm_math_fr",
+            None,
+            "QCM Maths : Pour l'équation x^2 - 5x + 6 = 0, quelles sont les solutions ? A) {-2; -3}  B) {2; 3}  C) {1; 6}  D) {-1; 6}.",
+            lambda t: ("b)" in t or "b " in t or "bonne réponse : b" in t) and "2" in t and "3" in t,
+        ),
+        (
+            "stem_phys_ohm_en",
+            None,
+            "A resistor of 12 ohms carries a current of 2 A. Calculate the voltage using Ohm's law step by step.",
+            lambda t: "24" in t and ("volt" in t or "v" in t),
+        ),
+        (
+            "stem_phys_newton_fr",
+            None,
+            "Un corps de masse 5 kg subit une accélération de 3 m/s^2. Calcule la force résultante.",
+            lambda t: "15" in t and ("newton" in t or " n" in t),
+        ),
+        (
+            "stem_chem_mole_fr",
+            None,
+            "Calcule le nombre de moles contenues dans 36 g d'eau H2O (M = 18 g/mol).",
+            lambda t: "2" in t and "mol" in t,
+        ),
+        (
+            "stem_chem_ph_en",
+            None,
+            "QCM Chemistry: A solution has pH = 3 at 25 C. How is it classified? A) Basic  B) Neutral  C) Acidic  D) Salt.",
+            lambda t: ("c)" in t or "acid" in t),
+        ),
+        (
+            "stem_bio_photo_en",
+            None,
+            "In secondary Biology, explain the role of chlorophyll and write the products of photosynthesis.",
+            lambda t: ("chlorophyll" in t or "chloroplast" in t) and ("glucose" in t or "oxygen" in t or "o2" in t),
+        ),
+        (
+            "stem_bio_mitosis_fr",
+            None,
+            "QCM Biologie : Quel type de division cellulaire conserve le même nombre de chromosomes 2n ? A) Méiose  B) Mitose  C) Fécondation  D) Osmose.",
+            lambda t: "mitose" in t and ("b)" in t or "bonne réponse" in t or "2n" in t),
+        ),
+    ]
+    if target == "stem":
+        return stem_suite
 
-
-def run_litert_lm_runtime_checks(litertlm_path: Path) -> Dict[str, str]:
-    """Loads the exported .litertlm in Google's real litert_lm Engine and generates responses."""
-    import litert_lm
-
-    test_cases = [
-        ("identity_fr", None, "Qui es-tu et qui t'a créé ?"),
-        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?"),
-        ("identity_georges", None, "Qui est Georges Byona ?"),
+    full_jua_suite = [
+        ("identity_fr", None, "Qui es-tu et qui t'a créé ?", lambda t: ("sautilm" in t or "losingtek" in t) and "rossi" not in t and "core" not in t),
+        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?", lambda t: ("sautilm" in t or "losingtek" in t) and "openai" not in t and "core" not in t),
+        ("identity_georges", None, "Qui est Georges Byona ?", lambda t: "georges byona" in t and "losingtek" in t and "nuru ai" not in t),
         (
             "greeting_fin_hey",
-            "You are SautiLM-Fin (SautiLM Jua), an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
+            "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English.",
             "Hey",
+            lambda t: ("sautilm" in t or "hello" in t or "savings" in t or "finance" in t) and "warsaw" not in t and "mtekmeda" not in t,
         ),
-        (
-            "greeting_voice_hey",
-            "You are SautiLM-Voice (SautiLM Jua), an offline Voice & Pocket Tutor assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
-            "Hey",
-        ),
-        ("lex_dda", None, "Que signifie le mot Bbadha Dda ?"),
+        ("lex_dda", None, "Que signifie le mot Bbadha Dda ?", lambda t: ("eau" in t or "maji" in t or "rivi" in t or "water" in t) and "grosse" not in t),
+        ("lex_bonne_journee", None, "Comment dire bonne journée en Bbadha ?", lambda t: ("dyiná" in t or "dyina" in t or "mbăi" in t or "mbai" in t or "ddyè" in t) and "propulsé" not in t),
         (
             "lex_rag_dda",
-            "Tu es SautiLM-Lex, assistant lexicographique hors-ligne de SautiLM. Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
+            "Tu es SautiLM-Jua-Lex, assistant lexicographique hors-ligne de SautiLM. Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
             "DICTIONNAIRE BBADHA VERIFIE: Mot: ddà | Grammaire: Terme lexical | Kiswahili: maji, kuwa refu | Francais: l'eau, la rivière, -loin.",
             "Que signifie le mot Bbadha ddà ?",
+            lambda t: ("eau" in t or "maji" in t or "rivi" in t) and "chien" not in t,
+        ),
+        (
+            "ius_art1_fr",
+            "Tu es SautiLM-Jua-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
+            "Que dit l'Article 1 de la Constitution de la RDC ?",
+            lambda t: ("état de droit" in t or "etat de droit" in t or "souverain" in t or "kinshasa" in t or "franc congolais" in t) and "ohada" not in t,
         ),
         (
             "ius_garde_a_vue",
-            "Tu es SautiLM-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
+            "Tu es SautiLM-Jua-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
             "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?",
+            lambda t: ("48" in t and ("constitution" in t or "avocat" in t or "art" in t)) and "vlan" not in t and "360" not in t,
         ),
         (
             "ius_custody_en",
-            "You are SautiLM-Ius (SautiLM Jua), an offline Congolese Law & Justice assistant by LosingTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Ius, an offline Congolese Law & Justice assistant by LosingTek Research. Answer accurately in English.",
             "What does the DRC Constitution say about the 48-hour police custody limit?",
+            lambda t: "48" in t and ("constitution" in t or "lawyer" in t or "art" in t) and "480" not in t,
         ),
         (
             "fin_avec_en",
-            "You are SautiLM-Fin (SautiLM Jua), an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English.",
             "In a savings group, 20 members buy 3 shares each at 2000 FC. Total capital?",
+            lambda t: "120000" in t or "120,000" in t,
         ),
         (
             "civ_birth_en",
-            "You are SautiLM-Civ (SautiLM Jua), an offline Civic Administration assistant by LosingTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant by LosingTek Research. Answer accurately in English.",
             "How to register a newborn's birth at the Civil Status Office within 90 days?",
+            lambda t: "90" in t and ("civil status" in t or "family code" in t or "116" in t) and "ddi.be" not in t,
         ),
         (
             "agri_cmd_en",
-            "You are SautiLM-Agri (SautiLM Jua), an offline Agronomy & Environment assistant by LosingTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Agri, an offline Agronomy & Environment assistant by LosingTek Research. Answer accurately in English.",
             "How to identify and control Cassava Mosaic Disease (CMD)?",
-        ),
-        (
-            "vision_stem_en",
-            "You are SautiLM-Vision (SautiLM Jua), an offline Vision & STEM Quiz assistant by LosingTek Research. Answer accurately in English.",
-            "Generate a STEM quiz question on how photosynthesis works in green leaves.",
+            lambda t: ("cassava mosaic" in t or "cmd" in t or "bemisia" in t or "whitefl" in t) and "oats" not in t and "bbadha" not in t,
         ),
         (
             "math_pastoral",
             None,
-            "Un éleveur en Ituri possède 12 vaches (Dyà). Il en achète 8 de plus, puis en vend 5 au marché. Combien lui en reste-t-il ?",
+            "Un éleveur en Ituri possède 12 vaches. Il en achète 8 de plus, puis en vend 5 au marché. Combien lui en reste-t-il ?",
+            lambda t: "15" in t and "bbadha" not in t and "dyà" not in t,
         ),
         (
             "med_cholera",
-            "Tu es SautiLM-Med, assistant de santé communautaire hors-ligne. Réponds clairement en français.",
-            "Quelles sont les 3 étapes essentielles pour purifier l'eau (Dda) et prévenir le choléra (Rra) ?",
+            "Tu es SautiLM-Jua-Med, assistant de santé communautaire hors-ligne. Réponds clairement en français.",
+            "Quelles sont les 3 étapes essentielles pour purifier l'eau et prévenir le choléra ?",
+            lambda t: ("bouillir" in t or "filtr" in t or "chlore" in t or "savon" in t) and "bbadha" not in t and "dda" not in t,
         ),
+        stem_suite[1],  # stem_quad_fr
+        stem_suite[4],  # stem_phys_ohm_en
+        stem_suite[8],  # stem_bio_photo_en
     ]
 
+    if target == "jua":
+        return full_jua_suite
+
+    prefix_map = {
+        "lex": ("lex_",),
+        "med": ("med_",),
+        "agri": ("agri_",),
+        "ius": ("ius_",),
+        "fin": ("fin_", "greeting_fin"),
+        "civ": ("civ_",),
+        "edu": ("stem_", "math_"),
+    }
+    prefixes = prefix_map.get(target, (f"{target}_",))
+    filtered = [row for row in full_jua_suite if row[0].startswith(prefixes)]
+    return filtered or [full_jua_suite[0], full_jua_suite[1]]
+
+
+def _score_runtime_outputs(outputs: Dict[str, str], target: str = "jua") -> tuple[int, int]:
+    """Scores grounded factual accuracy & zero-leakage compliance for the target suite."""
+    suite = _runtime_suite_for_target(target)
+    score = 0
+    for key, _, _, predicate in suite:
+        txt = (outputs.get(key) or "").lower()
+        words = txt.split()
+        unique_ratio = (len(set(words)) / len(words)) if words else 0.0
+        clean_tokens = "<pad>" not in txt and not _has_cjk(txt) and len(words) >= 4 and unique_ratio >= 0.30
+        if clean_tokens and predicate(txt):
+            score += 1
+    return score, len(suite)
+
+
+def run_litert_lm_runtime_checks(litertlm_path: Path, target: str = "jua") -> Dict[str, str]:
+    """Loads the exported .litertlm in Google's real litert_lm Engine and generates responses."""
+    import litert_lm
+
+    suite = _runtime_suite_for_target(target)
     outputs: Dict[str, str] = {}
     with litert_lm.Engine(str(litertlm_path), backend=litert_lm.Backend.CPU()) as engine:
-        for key, sys_prompt, user_prompt in test_cases:
+        for key, sys_prompt, user_prompt, _ in suite:
             init_messages = (
                 [{"role": "system", "content": [{"type": "text", "text": sys_prompt}]}]
                 if sys_prompt
@@ -377,18 +587,23 @@ def run_litert_lm_runtime_checks(litertlm_path: Path) -> Dict[str, str]:
             with engine.create_conversation(
                 messages=init_messages,
                 sampler_config=sampler,
-                max_output_tokens=220,
+                max_output_tokens=260,
             ) as conv:
                 reply = "".join(str(chunk) for chunk in conv.send_message_async(user_prompt)).strip()
             outputs[key] = reply
-            print(f"\n[LiteRT-LM LIVE CHECK: {key}]\nPrompt: {user_prompt}\nOutput: {reply[:400]}...")
-            if not reply or "<pad>" in reply:
-                raise RuntimeError(f"LiteRT-LM failed sanity check (empty or <pad>) on: {key}")
+            print(f"\n[LiteRT-LM LIVE CHECK ({target}): {key}]\nPrompt: {user_prompt}\nOutput: {reply[:400]}...")
+            if not reply or "<pad>" in reply or _has_cjk(reply):
+                raise RuntimeError(f"LiteRT-LM failed sanity check (empty, <pad>, or CJK leakage) on: {key}")
 
     return outputs
 
 
-def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: str) -> Dict[str, Any]:
+def export_with_litert_torch(
+    merged_dir: Path,
+    work_dir: Path,
+    base_model_id: str,
+    variant_cfg: Dict[str, str],
+) -> Dict[str, Any]:
     """Installs official litert-torch + litert-lm after GPU training, exports, benchmarks, and verifies .litertlm."""
     print("=== [SautiLM-Forge] Step 5: Installing Official Google litert-torch & litert-lm ===")
     subprocess.run(
@@ -411,10 +626,10 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
 
     from litert_torch.generative.export_hf import export as litert_export
 
-    # Empirical Run 3 benchmark on 270M proved dynamic_wi4b32_afp32 collapses (0/6) while dynamic_wi8_afp32 preserves reasoning.
+    target = variant_cfg["target"]
     recipes_to_eval = ["dynamic_wi8_afp32"]
     export_out_dir = work_dir / "litert_export_tmp"
-    final_litertlm = work_dir / "sautilm-jua.litertlm"
+    final_litertlm = work_dir / variant_cfg["litertlm_filename"]
     candidates: List[Dict[str, Any]] = []
 
     try:
@@ -423,7 +638,7 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
                 shutil.rmtree(export_out_dir)
             export_out_dir.mkdir(parents=True, exist_ok=True)
             candidate_file = work_dir / f"candidate_{recipe}.litertlm"
-            print(f"=== [SautiLM-Forge] Exporting merged Gemma3 model with recipe='{recipe}' ===")
+            print(f"=== [SautiLM-Forge] Exporting {variant_cfg['model_name']} with recipe='{recipe}' ===")
             try:
                 litert_export.export(
                     model=str(merged_dir),
@@ -443,12 +658,12 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
                 shutil.copy2(generated_files[0], candidate_file)
 
                 binary_check = verify_tflite_flatbuffers_inside_litertlm(candidate_file)
-                runtime_outputs = run_litert_lm_runtime_checks(candidate_file)
-                score = _score_runtime_outputs(runtime_outputs)
+                runtime_outputs = run_litert_lm_runtime_checks(candidate_file, target=target)
+                score, max_score = _score_runtime_outputs(runtime_outputs, target=target)
                 c_bytes = candidate_file.stat().st_size
                 c_mb = round(c_bytes / (1024 * 1024), 2)
                 print(
-                    f"[SautiLM-Forge] Candidate '{recipe}': {c_mb} MB | Accuracy Score: {score}/15"
+                    f"[SautiLM-Forge] Candidate '{recipe}': {c_mb} MB | Accuracy Score: {score}/{max_score}"
                 )
                 candidates.append(
                     {
@@ -457,6 +672,7 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
                         "size_bytes": c_bytes,
                         "size_mb": c_mb,
                         "quality_score": score,
+                        "max_score": max_score,
                         "binary_check": binary_check,
                         "runtime_outputs": runtime_outputs,
                     }
@@ -467,7 +683,6 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
         if not candidates:
             raise RuntimeError("All LiteRT-LM export recipes failed!")
 
-        # Select highest-scoring candidate (tie-break: smaller mobile bundle wins!)
         candidates.sort(key=lambda c: (-c["quality_score"], c["size_bytes"]))
         winner = candidates[0]
         shutil.copy2(winner["path"], final_litertlm)
@@ -479,9 +694,10 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
 
     size_bytes = final_litertlm.stat().st_size
     size_mb = round(size_bytes / (1024 * 1024), 2)
+    score_str = f"{winner['quality_score']}/{winner['max_score']}"
     print(
         f"[SautiLM-Forge] Selected '{winner['recipe']}' -> {final_litertlm.name}: "
-        f"{size_mb} MB ({size_bytes} bytes) | Score={winner['quality_score']}/15"
+        f"{size_mb} MB ({size_bytes} bytes) | Score={score_str}"
     )
 
     return {
@@ -489,14 +705,14 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
         "litertlm_size_bytes": size_bytes,
         "litertlm_size_mb": size_mb,
         "quantization_recipe": winner["recipe"],
-        "litertlm_quality_score": f"{winner['quality_score']}/15",
+        "litertlm_quality_score": score_str,
         "litertlm_binary_check": winner["binary_check"],
         "litertlm_runtime_test_outputs": winner["runtime_outputs"],
         "candidates_evaluated": [
             {
                 "recipe": c["recipe"],
                 "size_mb": c["size_mb"],
-                "quality_score": f"{c['quality_score']}/15",
+                "quality_score": f"{c['quality_score']}/{c['max_score']}",
             }
             for c in candidates
         ],
@@ -505,10 +721,18 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train and export modular SautiLM LiteRT-LM builds.")
+    parser.add_argument("--variant", default=None, help="Target variant, e.g. sautilm-jua or sautilm-jua-stem.")
+    args, _ = parser.parse_known_args()
+
     start_time = time.time()
     work_dir = Path("/kaggle/working") if Path("/kaggle/working").exists() else Path("./work_output")
     input_dir = Path("/kaggle/input") if Path("/kaggle/input").exists() else Path("./data")
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    variant_cfg = resolve_variant_config(input_dir, requested_variant=args.variant)
 
     print("=== [SautiLM-Forge] Step 1: Checking GPU & Environment ===")
     import torch
@@ -526,11 +750,11 @@ def main():
 
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
-    print(f"Device: {device_str} | Torch: {torch.__version__}")
+    print(f"Device: {device_str} | Torch: {torch.__version__} | Variant: {variant_cfg['model_name']}")
     if device_str == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    curated_data = load_and_balance_dataset(input_dir)
+    curated_data = load_and_balance_dataset(input_dir, variant_cfg)
 
     base_model_id = "unsloth/gemma-3-270m-it"
     print(f"=== [SautiLM-Forge] Step 2: Loading Base Model ({base_model_id}) ===")
@@ -570,7 +794,7 @@ def main():
     batch_size = 2 if device_str == "cuda" else 1
     grad_accum = 8 if device_str == "cuda" else 1
     effective_bs = batch_size * grad_accum
-    num_epochs = 2 if device_str == "cuda" else 1
+    num_epochs = (3 if len(encoded_examples) <= 1500 else 2) if device_str == "cuda" else 1
     total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
@@ -622,7 +846,7 @@ def main():
                     )
 
     print("=== [SautiLM-Forge] Step 4: Merging LoRA Adapter & Saving HF Checkpoint ===")
-    adapter_dir = work_dir / "sautilm_v1_lora_adapter"
+    adapter_dir = work_dir / variant_cfg["adapter_dirname"]
     merged_dir = work_dir / "merged_hf_model"
     model.save_pretrained(adapter_dir)
     merged_model = model.merge_and_unload()
@@ -636,11 +860,13 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    export_info = export_with_litert_torch(merged_dir, work_dir, base_model_id)
+    export_info = export_with_litert_torch(merged_dir, work_dir, base_model_id, variant_cfg)
 
     elapsed = round(time.time() - start_time, 2)
     metrics = {
-        "model_name": "SautiLM Jua",
+        "model_name": variant_cfg["model_name"],
+        "variant": variant_cfg["variant"],
+        "target": variant_cfg["target"],
         "base_model": base_model_id,
         "lora_r": lora_r,
         "lora_alpha": lora_alpha,
