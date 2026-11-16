@@ -178,10 +178,17 @@ def _has_repetition_loop(text: str) -> bool:
     return False
 
 
-def _select_clean_lex_rows(lex_items: List[Dict[str, Any]], max_core: int, max_other: int, sal_mult: int) -> List[Dict[str, Any]]:
-    """Prioritizes everyday Bbadha salutations and verified RAG entries without flooding 270M weights."""
-    rag_or_dda_lex: List[Dict[str, Any]] = []
-    salutation_lex: List[Dict[str, Any]] = []
+def _select_clean_lex_rows(
+    lex_items: List[Dict[str, Any]],
+    max_core: int,
+    max_other: int,
+    sal_mult: int,
+    max_rag: int = 160,
+) -> List[Dict[str, Any]]:
+    """Prioritizes everyday Bbadha salutations and clean natural Q&As without flooding 270M weights."""
+    natural_lex: List[Dict[str, Any]] = []
+    exact_dda_rag: List[Dict[str, Any]] = []
+    other_rag: List[Dict[str, Any]] = []
     core_headword_lex: List[Dict[str, Any]] = []
     other_lex: List[Dict[str, Any]] = []
     for item in lex_items:
@@ -191,6 +198,11 @@ def _select_clean_lex_rows(lex_items: List[Dict[str, Any]], max_core: int, max_o
         is_salutation = any(
             k in resp_lower for k in ("dyiná blĩ", "mbăi dyiná", "ndré dzo", "kūná bù", "mbăi bbo")
         )
+        is_natural_dda = (
+            "souvent écrit *dda*" in resp_lower
+            or "katika lugha ya **kibbadha" in resp_lower
+            or ("water / river" in resp_lower and "**ddà**" in resp_lower)
+        )
         is_greeting = len(prompt_lower.strip()) <= 20 and (
             "sautilm-jua-lex" in resp_lower
             or "sautilm-lex" in resp_lower
@@ -199,15 +211,16 @@ def _select_clean_lex_rows(lex_items: List[Dict[str, Any]], max_core: int, max_o
             or "habari" in resp_lower
         )
         is_rag = "dictionnaire bbadha verifie" in sys_lower
-        is_dda_qa = ("dda" in prompt_lower or "ddà" in prompt_lower) and (
-            "**ddà**" in resp_lower or "ddà" in resp_lower
-        )
+        is_exact_dda_word = "**ddà**" in resp_lower and "'áddà" not in prompt_lower and "adda-ni" not in prompt_lower
         is_clean_ascii_card = "\u0325" not in resp_lower and "\u0303" not in resp_lower
         is_core_headword = is_clean_ascii_card and any(f"**{w}**" in resp_lower for w in CORE_BBADHA_WORDS)
-        if is_salutation or is_greeting:
-            salutation_lex.append(item)
-        elif is_rag or is_dda_qa:
-            rag_or_dda_lex.append(item)
+        if is_salutation or is_natural_dda or is_greeting:
+            natural_lex.append(item)
+        elif is_rag or is_exact_dda_word:
+            if is_exact_dda_word:
+                exact_dda_rag.append(item)
+            else:
+                other_rag.append(item)
         elif is_core_headword:
             core_headword_lex.append(item)
         elif is_clean_ascii_card:
@@ -216,9 +229,13 @@ def _select_clean_lex_rows(lex_items: List[Dict[str, Any]], max_core: int, max_o
     if len(core_headword_lex) > max_core:
         core_headword_lex = random.sample(core_headword_lex, max_core)
     sampled_other = other_lex if len(other_lex) <= max_other else random.sample(other_lex, max_other)
+    remain_rag = max(0, max_rag - len(exact_dda_rag))
+    sampled_rag = other_rag if len(other_rag) <= remain_rag else random.sample(other_rag, remain_rag)
+
     picked: List[Dict[str, Any]] = []
-    picked.extend(salutation_lex * sal_mult)
-    picked.extend(rag_or_dda_lex)
+    picked.extend(natural_lex * sal_mult)
+    picked.extend(exact_dda_rag)
+    picked.extend(sampled_rag)
     picked.extend(core_headword_lex)
     picked.extend(sampled_other)
     return picked
@@ -251,7 +268,7 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
     if target != "jua":
         all_rows = [item for items in by_domain.values() for item in items]
         if target == "lex":
-            curated = _select_clean_lex_rows(all_rows, max_core=280, max_other=260, sal_mult=4)
+            curated = _select_clean_lex_rows(all_rows, max_core=240, max_other=160, sal_mult=4, max_rag=160)
             random.shuffle(curated)
             print(f"[SautiLM-Forge] Standalone specialty 'SautiLM-Jua-Lex': {len(curated)} clean rows")
             return curated
@@ -264,31 +281,31 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
         )
         return curated
 
-    # Full SautiLM-Jua foundation mix: prevent STEM (630) or Lex (22k) from overwhelming identity/Ius/Med/Agri
+    # Full SautiLM-Jua foundation mix: prevent STEM (750) or Lex (22k) from overwhelming identity/Ius/Med/Agri
     domain_caps = {
-        "identity": 240,
-        "ius": 260,
-        "med": 220,
-        "agri": 220,
-        "fin": 200,
-        "civ": 180,
-        "edu": 180,
-        "math": 200,
-        "voice": 140,
-        "vision": 160,
+        "identity": 220,
+        "ius": 220,
+        "med": 170,
+        "agri": 170,
+        "fin": 150,
+        "civ": 140,
+        "edu": 100,
+        "math": 170,
+        "voice": 100,
+        "vision": 110,
         "stem": 220,
     }
     for d, items in by_domain.items():
         if d == "lex":
             continue
-        cap = domain_caps.get(d, 200)
+        cap = domain_caps.get(d, 160)
         if len(items) >= cap:
             curated.extend(random.sample(items, cap))
         else:
-            mult = min(4, max(1, cap // max(1, len(items))))
+            mult = min(4, max(1, (cap + len(items) - 1) // max(1, len(items))))
             curated.extend((items * mult)[:cap])
 
-    clean_lex = _select_clean_lex_rows(by_domain.get("lex", []), max_core=100, max_other=80, sal_mult=2)
+    clean_lex = _select_clean_lex_rows(by_domain.get("lex", []), max_core=25, max_other=0, sal_mult=3, max_rag=48)
     curated.extend(clean_lex)
 
     random.shuffle(curated)
@@ -587,7 +604,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
 
     full_jua_suite = [
         ("identity_fr", None, "Qui es-tu et qui t'a créé ?", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-lex" not in t and "core" not in t),
-        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-jua-stem" not in t and "laurent" not in t and "core" not in t),
+        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?", lambda t: "sautilm-jua" in t and "losingtek" in t and "jacques uwonda" in t and "vanguard" not in t and "ianketa" not in t and "sautilm-jua-stem" not in t and "laurent" not in t and "core" not in t),
         ("identity_georges", None, "Qui est Georges Byona ?", lambda t: "georges byona" in t and "losingtek" in t and "nuru ai" not in t),
         (
             "greeting_fin_hey",
@@ -595,7 +612,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "Hey",
             lambda t: ("sautilm" in t or "hello" in t or "savings" in t or "finance" in t) and "warsaw" not in t and "mtekmeda" not in t,
         ),
-        ("lex_dda", None, "Que signifie le mot Bbadha Dda ?", lambda t: ("eau" in t or "maji" in t or "rivi" in t or "water" in t) and "grosse" not in t),
+        ("lex_dda", None, "Que signifie le mot Bbadha Dda ?", lambda t: ("eau" in t or "maji" in t or "rivi" in t or "water" in t) and ("loin" in t or "far" in t or "long" in t) and "german" not in t and "grosse" not in t),
         ("lex_bonne_journee", None, "Comment dire bonne journée en Bbadha ?", lambda t: ("dyiná" in t or "dyina" in t or "mbăi" in t or "mbai" in t or "ddyè" in t) and "propulsé" not in t),
         (
             "lex_rag_dda",
@@ -608,13 +625,13 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "ius_art1_fr",
             "Tu es SautiLM-Jua-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
             "Que dit l'Article 1 de la Constitution de la RDC ?",
-            lambda t: ("30 juin 1960" in t or "état de droit" in t or "etat de droit" in t) and ("justice" in t or "kinshasa" in t or "franc congolais" in t) and "gdrà" not in t and "ohada" not in t,
+            lambda t: "30 juin 1960" in t and ("état de droit" in t or "etat de droit" in t) and ("justice" in t or "kinshasa" in t or "debout congolais" in t) and "1er janvier" not in t and "angola" not in t and "gdrà" not in t and "ohada" not in t,
         ),
         (
             "ius_garde_a_vue",
             "Tu es SautiLM-Jua-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
             "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?",
-            lambda t: ("48" in t and ("constitution" in t or "avocat" in t or "art" in t)) and "vlan" not in t and "360" not in t,
+            lambda t: "48" in t and ("présumée innocente" in t or "presumee innocente" in t) and ("avocat" in t or "parquet" in t) and "basse-cour" not in t and "vlan" not in t and "360" not in t,
         ),
         (
             "ius_custody_en",
@@ -638,7 +655,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "agri_cmd_en",
             "You are SautiLM-Jua-Agri, an offline Agronomy & Environment assistant by LosingTek Research. Answer accurately in English.",
             "How to identify and control Cassava Mosaic Disease (CMD)?",
-            lambda t: ("cassava mosaic" in t or "cmd" in t or "bemisia" in t or "whitefl" in t) and "oats" not in t and "bbadha" not in t,
+            lambda t: ("cassava mosaic" in t or "cmd" in t or "bemisia" in t or "whitefl" in t) and "oats" not in t and "oyamite" not in t and "bbadha" not in t,
         ),
         (
             "math_pastoral",
@@ -654,7 +671,12 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ),
         stem_suite[1],  # stem_quad_fr
         stem_suite[4],  # stem_phys_ohm_en
-        stem_suite[8],  # stem_bio_photo_en
+        (
+            "stem_bio_photo_en",
+            None,
+            "In secondary Biology, explain the role of chlorophyll and write the products of photosynthesis.",
+            lambda t: ("chlorophyll" in t or "chloroplast" in t) and ("glucose" in t or "oxygen" in t or "o2" in t) and "60% hydrogen" not in t and "choropleth" not in t,
+        ),
     ]
 
     if target == "jua":
@@ -917,18 +939,18 @@ def main():
     target_key = variant_cfg["target"]
     if device_str != "cuda":
         num_epochs = 1
-    elif target_key in ("stem", "med", "agri", "ius"):
+    elif target_key in ("stem", "med", "agri", "ius", "jua"):
         num_epochs = 5
     else:
-        num_epochs = 3
+        num_epochs = 4
     total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
-    lr_by_target = {"stem": 1.35e-4, "med": 1.2e-4, "agri": 1.2e-4, "ius": 1.2e-4, "lex": 1.1e-4, "jua": 1.05e-4}
-    lr = lr_by_target.get(target_key, 1.1e-4)
+    lr_by_target = {"stem": 1.35e-4, "med": 1.25e-4, "agri": 1.25e-4, "ius": 1.25e-4, "lex": 1.2e-4, "jua": 1.35e-4}
+    lr = lr_by_target.get(target_key, 1.2e-4)
     print(f"[SautiLM-Forge] Hyperparams: target={target_key} | epochs={num_epochs} | steps={total_steps} | lr={lr}")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.015)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
 
     def lr_lambda(step_idx: int) -> float:
         warmup = max(10, int(0.08 * total_steps))

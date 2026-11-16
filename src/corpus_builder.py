@@ -555,7 +555,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
             "En **Bbadha (Kilendu)**, **au revoir** se dit **Ddyè bblò** ou **Ndré dda**.",
         ),
     ]
-    for _ in range(2):
+    for _ in range(4):
         for q, a in natural_lex_qas:
             for sys_p in (None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM):
                 instructions.append(format_gemma3_turn(q, a, domain="lex", system_prompt=sys_p))
@@ -618,6 +618,16 @@ def generate_identity_instructions() -> List[Dict[str, Any]]:
             "I run directly on Android smartphones via LiteRT-LM with zero internet connection, supporting standalone domain builds (**STEM**, **Lex**, **Ius**, **Med**, **Agri**, **Fin**, **Civ**).",
         ),
         (
+            "Who created SautiLM-Jua and what languages does it support?",
+            "I am **SautiLM-Jua**, developed in **Bunia, Ituri (DRC)** by **LosingTek Research** (**Georges Byona**, **Abraham Imani**, **Jacques Uwonda**).\n\n"
+            "I run completely offline via LiteRT-LM and support **French**, **English**, **Kiswahili**, and **Bbadha (Kilendu)**.",
+        ),
+        (
+            "Introduce SautiLM-Jua and its modular specialty builds.",
+            "**SautiLM-Jua** is the compact offline Edge-AI foundation model by **LosingTek Research** (**Georges Byona**, **Abraham Imani**, **Jacques Uwonda**).\n\n"
+            "Its independent modular domain builds are **SautiLM-Jua-STEM**, **SautiLM-Jua-Med**, **SautiLM-Jua-Agri**, **SautiLM-Jua-Ius**, **SautiLM-Jua-Lex**, **SautiLM-Jua-Fin**, and **SautiLM-Jua-Civ**.",
+        ),
+        (
             "Quels sont les modèles de la famille SautiLM ?",
             "La feuille de route **SautiLM** développée par **LosingTek Research** repose sur une série de modèles nommés en **Kiswahili court** :\n\n"
             "1. **SautiLM-Jua** : Modèle fondation texte hors-ligne (LiteRT-LM).\n"
@@ -631,7 +641,7 @@ def generate_identity_instructions() -> List[Dict[str, Any]]:
             "Il travaille aux côtés d'**Abraham Imani** (Cofondateur & AI/ML Lead) et de **Jacques Uwonda** (Cofondateur & Software Engineer) pour concevoir des modèles d'intelligence artificielle souverains et hors-ligne en **Français**, **Anglais**, **Kiswahili** et **Bbadha (Kilendu)** sur smartphone Android.",
         ),
     ]
-    return _repeat_domain_pairs(pairs, domain="identity", repetitions=12)
+    return _repeat_domain_pairs(pairs, domain="identity", repetitions=9)
 
 
 def generate_math_instructions() -> List[Dict[str, Any]]:

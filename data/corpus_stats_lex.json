@@ -2,9 +2,9 @@
   "model_series": "SautiLM-Jua-Lex",
   "target": "lex",
   "lexicon_count": 1150,
-  "total_instructions": 22402,
+  "total_instructions": 22462,
   "domain_counts": {
-    "lex": 22402
+    "lex": 22462
   },
   "train_jsonl_path": "data/sautilm_jua_lex_train.jsonl",
   "mobile_lexicon_path": "data/bbadha_full_lexicon.json"
