@@ -47,7 +47,7 @@ class TestCorpusBuilder(unittest.TestCase):
                     self.assertNotIn("—", row["text"])
                     self.assertNotIn("–", row["text"])
 
-        for expected_domain in ["identity", "lex", "math", "edu", "med", "ius", "vision"]:
+        for expected_domain in ["identity", "lex", "math", "edu", "med", "ius", "vision", "fin", "civ", "agri"]:
             self.assertIn(expected_domain, domains)
 
 

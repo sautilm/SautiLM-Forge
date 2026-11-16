@@ -3,6 +3,17 @@ from pathlib import Path
 import shutil
 from typing import Any, Dict, List
 
+try:
+    from .domain_sft_pairs import (
+        generate_greetings_and_multiturn,
+        generate_multilingual_domains_v11,
+    )
+except ImportError:
+    from domain_sft_pairs import (
+        generate_greetings_and_multiturn,
+        generate_multilingual_domains_v11,
+    )
+
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 BBADHA_JSON_DIR = WORKSPACE_ROOT / "Flutter" / "bbadha" / "assets" / "jsons"
 FLUTTER_SAUTILM_ASSETS_DATA_DIR = WORKSPACE_ROOT / "Flutter" / "sautilm" / "assets" / "data"
@@ -862,7 +873,7 @@ def build_all_corpora(output_dir: Path) -> Dict[str, Any]:
     FLUTTER_SAUTILM_ASSETS_DATA_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(lex_path, FLUTTER_SAUTILM_ASSETS_DATA_DIR / "bbadha_full_lexicon.json")
 
-    # 2. Generate instruction dataset across all SautiLM domains
+    # 2. Generate balanced multilingual (EN, FR, SW, Bbadha) instruction dataset across all 10 domains
     all_instructions: List[Dict[str, Any]] = []
     all_instructions.extend(generate_identity_instructions())
     all_instructions.extend(generate_lex_instructions(raw_entries))
@@ -870,6 +881,8 @@ def build_all_corpora(output_dir: Path) -> Dict[str, Any]:
     all_instructions.extend(generate_edu_and_med_instructions())
     all_instructions.extend(generate_congolese_law_instructions())
     all_instructions.extend(generate_vision_instructions())
+    all_instructions.extend(generate_greetings_and_multiturn())
+    all_instructions.extend(generate_multilingual_domains_v11())
 
     train_path = output_dir / "sautilm_v1_train.jsonl"
     with open(train_path, "w", encoding="utf-8") as f:

@@ -61,10 +61,11 @@ def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
     random.seed(42)
     curated: List[Dict[str, Any]] = []
 
-    # Balanced oversampling of core reasoning, identity, law, health, vision, and math
+    # v1.1 Balanced mix: retain strong EN/FR/SW domain & greeting mastery without overfitting on Bbadha cards
     for d, items in by_domain.items():
         if d != "lex":
-            curated.extend(items * 3)
+            mult = 2 if len(items) >= 120 else 3
+            curated.extend(items * mult)
 
     # For lex: prioritize RAG-grounded entries, natural Q&As, and exact core Bbadha headword cards
     lex_items = by_domain.get("lex", [])
@@ -75,29 +76,32 @@ def load_and_balance_dataset(input_root: Path) -> List[Dict[str, Any]]:
         sys_lower = str(item.get("system", "")).lower()
         prompt_lower = str(item.get("prompt", "")).lower()
         resp_lower = str(item.get("response", "")).lower()
+        is_greeting = len(prompt_lower.strip()) <= 20 and (
+            "sautilm-lex" in resp_lower or "hello" in resp_lower or "bonjour" in resp_lower or "habari" in resp_lower
+        )
         is_rag = "dictionnaire bbadha verifie" in sys_lower
         is_dda_qa = ("dda" in prompt_lower or "ddà" in prompt_lower) and (
             "**ddà**" in resp_lower or "ddà" in resp_lower
         )
         is_core_headword = any(f"**{w}**" in resp_lower for w in CORE_BBADHA_WORDS)
-        if is_rag or is_dda_qa:
+        if is_greeting or is_rag or is_dda_qa:
             rag_or_dda_lex.append(item)
         elif is_core_headword:
             core_headword_lex.append(item)
         else:
             other_lex.append(item)
 
-    if len(core_headword_lex) > 500:
-        core_headword_lex = random.sample(core_headword_lex, 500)
+    if len(core_headword_lex) > 450:
+        core_headword_lex = random.sample(core_headword_lex, 450)
     curated.extend(rag_or_dda_lex * 2)
     curated.extend(core_headword_lex)
-    target_other = max(400, 2800 - len(curated))
+    target_other = min(750, max(350, 3400 - len(curated)))
     sampled_other = other_lex if len(other_lex) <= target_other else random.sample(other_lex, target_other)
     curated.extend(sampled_other)
 
     random.shuffle(curated)
     print(
-        f"[SautiLM-Forge] Curated dataset: {len(curated)} rows "
+        f"[SautiLM-Forge] Curated v1.1 dataset: {len(curated)} rows "
         f"(rag_dda={len(rag_or_dda_lex)}x2, core_headword={len(core_headword_lex)}, "
         f"sampled_other_lex={len(sampled_other)})"
     )
@@ -266,23 +270,30 @@ def _shim_litert_lm_builder_compat() -> None:
 
 
 def _score_runtime_outputs(outputs: Dict[str, str]) -> int:
-    """Scores grounded factual accuracy & hallucination resistance across 8 domain checks (max 8)."""
+    """Scores grounded factual accuracy & hallucination resistance across 15 EN/FR/SW & greeting checks (max 15)."""
     score = 0
     checks = {
         "identity_fr": lambda t: ("sautilm" in t or "losingtek" in t) and "rossi" not in t and "nuru ai research" not in t,
         "identity_en": lambda t: ("sautilm" in t or "losingtek" in t) and "openai" not in t,
         "identity_georges": lambda t: "georges byona" in t and "losingtek" in t and "nuru ai" not in t and "edge-bert" not in t,
+        "greeting_fin_hey": lambda t: ("sautilm-fin" in t or "hello" in t or "savings" in t or "finance" in t) and "warsaw" not in t and "mtekmeda" not in t,
+        "greeting_voice_hey": lambda t: ("sautilm" in t or "hello" in t or "phonetic" in t) and "explicação" not in t and "mtekmeda" not in t,
         "lex_dda": lambda t: ("eau" in t or "maji" in t or "rivi" in t or "water" in t) and "grosse" not in t and ": (1)" not in t,
         "lex_rag_dda": lambda t: ("eau" in t or "maji" in t or "rivi" in t) and "chien" not in t and "(19)" not in t,
         "ius_garde_a_vue": lambda t: ("48" in t and ("constitution" in t or "avocat" in t or "art" in t)) and "vlan" not in t and "360" not in t,
-        "math_pastoral": lambda t: ("15" in t),
-        "med_cholera": lambda t: ("bouillir" in t or "filtr" in t or "chlore" in t or "savon" in t),
+        "ius_custody_en": lambda t: "48" in t and ("constitution" in t or "lawyer" in t or "art" in t) and "480" not in t,
+        "fin_avec_en": lambda t: "120000" in t or "120,000" in t,
+        "civ_birth_en": lambda t: "90" in t and ("civil status" in t or "family code" in t or "116" in t) and "ddi.be" not in t,
+        "agri_cmd_en": lambda t: ("cassava mosaic" in t or "cmd" in t or "bemisia" in t or "whitefl" in t) and "oats" not in t,
+        "vision_stem_en": lambda t: "chlorophyll" in t or "chloroplast" in t or "green leaves" in t,
+        "math_pastoral": lambda t: "15" in t,
+        "med_cholera": lambda t: "bouillir" in t or "filtr" in t or "chlore" in t or "savon" in t,
     }
     for k, fn in checks.items():
         txt = (outputs.get(k) or "").lower()
         words = txt.split()
         unique_ratio = (len(set(words)) / len(words)) if words else 0.0
-        if len(words) >= 5 and unique_ratio >= 0.30 and fn(txt):
+        if "<pad>" not in txt and len(words) >= 5 and unique_ratio >= 0.30 and fn(txt):
             score += 1
     return score
 
@@ -295,6 +306,16 @@ def run_litert_lm_runtime_checks(litertlm_path: Path) -> Dict[str, str]:
         ("identity_fr", None, "Qui es-tu et qui t'a créé ?"),
         ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?"),
         ("identity_georges", None, "Qui est Georges Byona ?"),
+        (
+            "greeting_fin_hey",
+            "You are SautiLM-Fin (SautiLM Jua), an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
+            "Hey",
+        ),
+        (
+            "greeting_voice_hey",
+            "You are SautiLM-Voice (SautiLM Jua), an offline Voice & Pocket Tutor assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
+            "Hey",
+        ),
         ("lex_dda", None, "Que signifie le mot Bbadha Dda ?"),
         (
             "lex_rag_dda",
@@ -306,6 +327,31 @@ def run_litert_lm_runtime_checks(litertlm_path: Path) -> Dict[str, str]:
             "ius_garde_a_vue",
             "Tu es SautiLM-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
             "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?",
+        ),
+        (
+            "ius_custody_en",
+            "You are SautiLM-Ius (SautiLM Jua), an offline Congolese Law & Justice assistant by LosingTek Research. Answer accurately in English.",
+            "What does the DRC Constitution say about the 48-hour police custody limit?",
+        ),
+        (
+            "fin_avec_en",
+            "You are SautiLM-Fin (SautiLM Jua), an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English.",
+            "In a savings group, 20 members buy 3 shares each at 2000 FC. Total capital?",
+        ),
+        (
+            "civ_birth_en",
+            "You are SautiLM-Civ (SautiLM Jua), an offline Civic Administration assistant by LosingTek Research. Answer accurately in English.",
+            "How to register a newborn's birth at the Civil Status Office within 90 days?",
+        ),
+        (
+            "agri_cmd_en",
+            "You are SautiLM-Agri (SautiLM Jua), an offline Agronomy & Environment assistant by LosingTek Research. Answer accurately in English.",
+            "How to identify and control Cassava Mosaic Disease (CMD)?",
+        ),
+        (
+            "vision_stem_en",
+            "You are SautiLM-Vision (SautiLM Jua), an offline Vision & STEM Quiz assistant by LosingTek Research. Answer accurately in English.",
+            "Generate a STEM quiz question on how photosynthesis works in green leaves.",
         ),
         (
             "math_pastoral",
@@ -327,17 +373,17 @@ def run_litert_lm_runtime_checks(litertlm_path: Path) -> Dict[str, str]:
                 if sys_prompt
                 else None
             )
-            sampler = litert_lm.SamplerConfig(top_k=40, top_p=0.95, temperature=0.2, seed=42)
+            sampler = litert_lm.SamplerConfig(top_k=32, top_p=0.90, temperature=0.15, seed=42)
             with engine.create_conversation(
                 messages=init_messages,
                 sampler_config=sampler,
-                max_output_tokens=256,
+                max_output_tokens=220,
             ) as conv:
                 reply = "".join(str(chunk) for chunk in conv.send_message_async(user_prompt)).strip()
             outputs[key] = reply
             print(f"\n[LiteRT-LM LIVE CHECK: {key}]\nPrompt: {user_prompt}\nOutput: {reply[:400]}...")
-            if not reply:
-                raise RuntimeError(f"LiteRT-LM produced empty response for test case: {key}")
+            if not reply or "<pad>" in reply:
+                raise RuntimeError(f"LiteRT-LM failed sanity check (empty or <pad>) on: {key}")
 
     return outputs
 
@@ -402,7 +448,7 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
                 c_bytes = candidate_file.stat().st_size
                 c_mb = round(c_bytes / (1024 * 1024), 2)
                 print(
-                    f"[SautiLM-Forge] Candidate '{recipe}': {c_mb} MB | Accuracy Score: {score}/8"
+                    f"[SautiLM-Forge] Candidate '{recipe}': {c_mb} MB | Accuracy Score: {score}/15"
                 )
                 candidates.append(
                     {
@@ -435,7 +481,7 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
     size_mb = round(size_bytes / (1024 * 1024), 2)
     print(
         f"[SautiLM-Forge] Selected '{winner['recipe']}' -> {final_litertlm.name}: "
-        f"{size_mb} MB ({size_bytes} bytes) | Score={winner['quality_score']}/8"
+        f"{size_mb} MB ({size_bytes} bytes) | Score={winner['quality_score']}/15"
     )
 
     return {
@@ -443,14 +489,14 @@ def export_with_litert_torch(merged_dir: Path, work_dir: Path, base_model_id: st
         "litertlm_size_bytes": size_bytes,
         "litertlm_size_mb": size_mb,
         "quantization_recipe": winner["recipe"],
-        "litertlm_quality_score": f"{winner['quality_score']}/8",
+        "litertlm_quality_score": f"{winner['quality_score']}/15",
         "litertlm_binary_check": winner["binary_check"],
         "litertlm_runtime_test_outputs": winner["runtime_outputs"],
         "candidates_evaluated": [
             {
                 "recipe": c["recipe"],
                 "size_mb": c["size_mb"],
-                "quality_score": f"{c['quality_score']}/8",
+                "quality_score": f"{c['quality_score']}/15",
             }
             for c in candidates
         ],
@@ -507,8 +553,8 @@ def main():
         device_map={"": 0} if device_str == "cuda" else None,
     )
 
-    lora_r = 32
-    lora_alpha = 64
+    lora_r = 16
+    lora_alpha = 32
     peft_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
@@ -524,12 +570,12 @@ def main():
     batch_size = 2 if device_str == "cuda" else 1
     grad_accum = 8 if device_str == "cuda" else 1
     effective_bs = batch_size * grad_accum
-    num_epochs = 3 if device_str == "cuda" else 1
+    num_epochs = 2 if device_str == "cuda" else 1
     total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2.5e-4, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1.2e-4, weight_decay=0.02)
 
     def lr_lambda(step_idx: int) -> float:
         warmup = max(10, int(0.08 * total_steps))
