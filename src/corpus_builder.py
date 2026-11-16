@@ -9,11 +9,21 @@ try:
         generate_greetings_and_multiturn,
         generate_multilingual_domains_v11,
     )
+    from .specialty_sft_pairs import (
+        generate_agri_specialty_pairs,
+        generate_ius_specialty_pairs,
+        generate_med_specialty_pairs,
+    )
     from .stem_sft_pairs import generate_stem_instructions
 except ImportError:
     from domain_sft_pairs import (
         generate_greetings_and_multiturn,
         generate_multilingual_domains_v11,
+    )
+    from specialty_sft_pairs import (
+        generate_agri_specialty_pairs,
+        generate_ius_specialty_pairs,
+        generate_med_specialty_pairs,
     )
     from stem_sft_pairs import generate_stem_instructions
 
@@ -320,11 +330,11 @@ def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, 
 
 
 def _is_clean_sft_example(bb_s: str, sw_s: str, fr_s: str) -> bool:
-    """Filters out noisy OCR fragments so SautiLM-Lex trains only on clean trilingual sentences."""
+    """Filters out noisy OCR fragments so SautiLM-Jua-Lex trains only on clean trilingual sentences."""
     if not (bb_s and sw_s and fr_s):
         return False
     combined = f"{bb_s} {sw_s} {fr_s}"
-    if any(bad in combined for bad in ("£", "%", "/!", "expr", "£xpr", "Is coulaient")):
+    if any(bad in combined for bad in ("£", "%", "/!", "expr", "£xpr", "Is coulaient", "\u0325", "\u0303", "litt.")):
         return False
     if len(bb_s.strip()) < 3 or len(sw_s.strip()) < 3 or len(fr_s.strip()) < 3:
         return False
@@ -545,9 +555,10 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
             "En **Bbadha (Kilendu)**, **au revoir** se dit **Ddyè bblò** ou **Ndré dda**.",
         ),
     ]
-    for q, a in natural_lex_qas:
-        for sys_p in (None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM):
-            instructions.append(format_gemma3_turn(q, a, domain="lex", system_prompt=sys_p))
+    for _ in range(2):
+        for q, a in natural_lex_qas:
+            for sys_p in (None, SYSTEM_PROMPT_SAUTILM_SHORT, SYSTEM_PROMPT_SAUTILM):
+                instructions.append(format_gemma3_turn(q, a, domain="lex", system_prompt=sys_p))
 
     return instructions
 
@@ -944,8 +955,11 @@ def _assemble_jua_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[s
     all_instructions.extend(generate_math_instructions())
     all_instructions.extend(generate_edu_instructions())
     all_instructions.extend(generate_med_instructions())
+    all_instructions.extend(generate_med_specialty_pairs())
     all_instructions.extend(generate_congolese_law_instructions())
+    all_instructions.extend(generate_ius_specialty_pairs())
     all_instructions.extend(generate_agri_instructions())
+    all_instructions.extend(generate_agri_specialty_pairs())
     all_instructions.extend(generate_fin_instructions())
     all_instructions.extend(generate_civ_instructions())
     all_instructions.extend(generate_vision_instructions())
@@ -988,9 +1002,9 @@ def build_target_corpus(target: str, output_dir: Path) -> Dict[str, Any]:
     else:
         domain_builders = {
             "lex": lambda: generate_lex_instructions(raw_entries),
-            "med": generate_med_instructions,
-            "agri": generate_agri_instructions,
-            "ius": generate_congolese_law_instructions,
+            "med": generate_med_specialty_pairs,
+            "agri": generate_agri_specialty_pairs,
+            "ius": generate_ius_specialty_pairs,
             "fin": generate_fin_instructions,
             "civ": generate_civ_instructions,
             "edu": generate_edu_instructions,
@@ -1002,7 +1016,14 @@ def build_target_corpus(target: str, output_dir: Path) -> Dict[str, Any]:
             for r in (generate_greetings_and_multiturn() + generate_multilingual_domains_v11())
             if r.get("domain") == normalized
         ]
-        instructions = domain_builders[normalized]() + supplement
+        # Avoid dumping 15x duplicates when rich standalone specialty datasets already exist
+        base_specialty = (
+            generate_med_instructions()[:6] if normalized == "med"
+            else generate_agri_instructions()[:6] if normalized == "agri"
+            else generate_congolese_law_instructions()[:14] if normalized == "ius"
+            else []
+        )
+        instructions = domain_builders[normalized]() + base_specialty + supplement
         model_series = f"SautiLM-Jua-{normalized.upper() if normalized == 'stem' else normalized.capitalize()}"
         jsonl_name = f"sautilm_jua_{normalized}_train.jsonl"
         stats_name = f"corpus_stats_{normalized}.json"

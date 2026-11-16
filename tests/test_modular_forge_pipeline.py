@@ -5,6 +5,8 @@ import unittest
 
 from kaggle_kernel.train_and_export import (
     _has_cjk,
+    _has_repetition_loop,
+    _has_unexpected_script,
     _runtime_suite_for_target,
     _score_runtime_outputs,
     load_and_balance_dataset,
@@ -35,7 +37,7 @@ class TestModularForgePipeline(unittest.TestCase):
             build_target_corpus("stem", data_dir)
             cfg = resolve_variant_config(data_dir, "sautilm-jua-stem")
             rows = load_and_balance_dataset(data_dir, cfg)
-            self.assertGreaterEqual(len(rows), 600)
+            self.assertGreaterEqual(len(rows), 620)
             for row in rows:
                 self.assertEqual(row["domain"], "stem")
 
@@ -58,8 +60,14 @@ class TestModularForgePipeline(unittest.TestCase):
         self.assertEqual(score, 10)
         self.assertEqual(total, 10)
 
-        # CJK leakage, Bbadha hallucination, or list-numbering false positives must fail
+        # CJK, Thai script, repetition loops, and false-positive numbers must all fail
         self.assertTrue(_has_cjk("Articles du 掛け legaux"))
+        self.assertTrue(_has_unexpected_script("Informationทางการแพทย์ Art. 18"))
+        self.assertTrue(
+            _has_repetition_loop(
+                "*mbé* (Bbadha, Est de la RDC), " * 7
+            )
+        )
         corrupted = dict(clean_outputs)
         corrupted["stem_quad_fr"] = "Vocabulaire Bbadha : Delta = 64, x1 = 3, x2 = -1, 1 + 5 * 4500."
         corrupted["stem_phys_ohm_en"] = "By Ohm's law 24 A = 2 V and 掛け."
@@ -67,6 +75,25 @@ class TestModularForgePipeline(unittest.TestCase):
         corrupted["stem_bio_photo_en"] = "Choropleth Index uses chlorophyll to make glucose."
         bad_score, _ = _score_runtime_outputs(corrupted, target="stem")
         self.assertEqual(bad_score, 6)
+
+    def test_all_partner_targets_build_and_have_dedicated_eval_suites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            for target in ("med", "agri", "ius", "lex"):
+                stats = build_target_corpus(target, data_dir)
+                self.assertGreaterEqual(stats["total_instructions"], 80)
+                cfg = resolve_variant_config(data_dir, f"sautilm-jua-{target}")
+                rows = load_and_balance_dataset(data_dir, cfg)
+                self.assertGreaterEqual(len(rows), 200)
+                self.assertEqual(len(_runtime_suite_for_target(target)), 8)
+
+            jua_stats = build_target_corpus("jua", data_dir)
+            self.assertGreaterEqual(jua_stats["total_instructions"], 20000)
+            jua_cfg = resolve_variant_config(data_dir, "sautilm-jua")
+            jua_rows = load_and_balance_dataset(data_dir, jua_cfg)
+            self.assertGreaterEqual(len(jua_rows), 1800)
+            self.assertLessEqual(len(jua_rows), 2800)
+            self.assertEqual(len(_runtime_suite_for_target("jua")), 18)
 
     def test_orchestrator_target_config_and_model_card_naming(self):
         jua_cfg = _target_config("jua")

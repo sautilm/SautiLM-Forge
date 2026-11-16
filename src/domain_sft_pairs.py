@@ -5,9 +5,9 @@ from typing import Any, Dict, List
 
 def _make_role_prompts(code: str, title_en: str, title_fr: str, title_sw: str) -> Dict[str, str]:
     return {
-        "en": f"You are {code} (SautiLM Jua), an offline {title_en} assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
-        "fr": f"Tu es {code} (SautiLM Jua), assistant hors-ligne de {title_fr} créé par LosingTek Research. Réponds clairement en français. Pour une simple salutation (ex: Hey, Bonjour), réponds en 1 à 2 phrases.",
-        "sw": f"Wewe ni {code} (SautiLM Jua), msaidizi wa {title_sw} bila mtandao kutoka LosingTek Research. Jibu kwa Kiswahili fasaha. Kwa salamu fupi, jibu kwa sentensi 1 au 2.",
+        "en": f"You are {code} (SautiLM-Jua), an offline {title_en} assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
+        "fr": f"Tu es {code} (SautiLM-Jua), assistant hors-ligne de {title_fr} créé par LosingTek Research. Réponds clairement en français. Pour une simple salutation (ex: Hey, Bonjour), réponds en 1 à 2 phrases.",
+        "sw": f"Wewe ni {code} (SautiLM-Jua), msaidizi wa {title_sw} bila mtandao kutoka LosingTek Research. Jibu kwa Kiswahili fasaha. Kwa salamu fupi, jibu kwa sentensi 1 au 2.",
     }
 
 
@@ -240,7 +240,7 @@ def generate_multilingual_domains_v11() -> List[Dict[str, Any]]:
         ("en", "What are the key legal forms of companies under OHADA commercial law in DRC?",
          "### OHADA Commercial Entities in DRC (**SautiLM-Ius**)\n\nUnder the **OHADA Uniform Act on Commercial Companies (AUSCGIE)** applicable in DR Congo, entrepreneurs can form:\n1. **SARL** (Limited Liability Company)\n2. **SA** (Public Limited Company)\n3. **SAS** (Simplified Joint-Stock Company)\n4. **SNC**, **SCS**, and **GIE** registered at the **RCCM** (*Guichet Unique*)."),
         ("fr", "Que dit l'Article 1 de la Constitution de la RDC ?",
-         "### Article 1 de la Constitution de la RDC (**SautiLM-Ius**)\n\nSelon l'**Article 1 de la Constitution de la République Démocratique du Congo (2006)** :\n1. **État souverain :** La RDC est, dans ses frontières du **30 juin 1960**, un État de droit, indépendant, souverain, uni et indivisible, social, démocratique et laïc.\n2. **Devise et Emblèmes :** Sa devise est **Justice - Paix - Travail**. Son hymne national est le **Débout Congolais**, sa monnaie le **Franc congolais (CDF)**, sa langue officielle le **français**, et ses quatre langues nationales le **kikongo**, le **lingala**, le **swahili** et le **tshiluba**."),
+         "### Article 1 de la Constitution de la RDC (**SautiLM-Ius**)\n\nSelon l'**Article 1 de la Constitution de la République Démocratique du Congo (2006)** :\n1. **État souverain :** La RDC est, dans ses frontières du **30 juin 1960**, un État de droit, indépendant, souverain, uni et indivisible, social, démocratique et laïc.\n2. **Devise et Emblèmes :** Sa devise est **Justice - Paix - Travail**. Son hymne national est **Debout Congolais**, sa monnaie le **Franc congolais (CDF)**, sa langue officielle le **français**, et ses quatre langues nationales le **kikongo**, le **lingala**, le **swahili** et le **tshiluba**."),
         ("en", "What does Article 1 of the DRC Constitution state?",
          "### Article 1 of the DRC Constitution (**SautiLM-Ius**)\n\nUnder **Article 1 of the 2006 DRC Constitution**, the Democratic Republic of the Congo is, within its borders of **June 30, 1960**, an independent, sovereign, united, indivisible, democratic, and secular State of law. Its motto is **Justice - Peace - Work**, its currency is the **Congolese Franc (CDF)**, its official language is **French**, and its four national languages are **Kikongo, Lingala, Kiswahili, and Tshiluba**."),
         ("sw", "Ibara ya 1 ya Katiba ya RDC inasema nini?",

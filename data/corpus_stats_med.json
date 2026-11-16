@@ -1,0 +1,10 @@
+{
+  "model_series": "SautiLM-Jua-Med",
+  "target": "med",
+  "lexicon_count": 0,
+  "total_instructions": 100,
+  "domain_counts": {
+    "med": 100
+  },
+  "train_jsonl_path": "data/sautilm_jua_med_train.jsonl"
+}

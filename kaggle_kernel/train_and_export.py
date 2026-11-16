@@ -148,6 +148,82 @@ def _has_cjk(text: str) -> bool:
     )
 
 
+def _has_unexpected_script(text: str) -> bool:
+    """Detects CJK, Thai, Arabic, Cyrillic, or Devanagari script hallucinations in Latin-alphabet SautiLM builds."""
+    if _has_cjk(text):
+        return True
+    for ch in text:
+        code = ord(ch)
+        if (
+            (0x0E00 <= code <= 0x0E7F)  # Thai
+            or (0x0400 <= code <= 0x04FF)  # Cyrillic
+            or (0x0600 <= code <= 0x06FF)  # Arabic
+            or (0x0900 <= code <= 0x097F)  # Devanagari
+        ):
+            return True
+    return False
+
+
+def _has_repetition_loop(text: str) -> bool:
+    """Detects degenerate repeating 3-gram phrase loops such as '*mbé* (Bbadha)... *mbé*...'."""
+    words = [w for w in text.lower().split() if w]
+    if len(words) < 18:
+        return False
+    trigrams: Dict[tuple[str, str, str], int] = {}
+    for i in range(len(words) - 2):
+        tri = (words[i], words[i + 1], words[i + 2])
+        trigrams[tri] = trigrams.get(tri, 0) + 1
+        if trigrams[tri] >= 5:
+            return True
+    return False
+
+
+def _select_clean_lex_rows(lex_items: List[Dict[str, Any]], max_core: int, max_other: int, sal_mult: int) -> List[Dict[str, Any]]:
+    """Prioritizes everyday Bbadha salutations and verified RAG entries without flooding 270M weights."""
+    rag_or_dda_lex: List[Dict[str, Any]] = []
+    salutation_lex: List[Dict[str, Any]] = []
+    core_headword_lex: List[Dict[str, Any]] = []
+    other_lex: List[Dict[str, Any]] = []
+    for item in lex_items:
+        sys_lower = str(item.get("system", "")).lower()
+        prompt_lower = str(item.get("prompt", "")).lower()
+        resp_lower = str(item.get("response", "")).lower()
+        is_salutation = any(
+            k in resp_lower for k in ("dyiná blĩ", "mbăi dyiná", "ndré dzo", "kūná bù", "mbăi bbo")
+        )
+        is_greeting = len(prompt_lower.strip()) <= 20 and (
+            "sautilm-jua-lex" in resp_lower
+            or "sautilm-lex" in resp_lower
+            or "hello" in resp_lower
+            or "bonjour" in resp_lower
+            or "habari" in resp_lower
+        )
+        is_rag = "dictionnaire bbadha verifie" in sys_lower
+        is_dda_qa = ("dda" in prompt_lower or "ddà" in prompt_lower) and (
+            "**ddà**" in resp_lower or "ddà" in resp_lower
+        )
+        is_clean_ascii_card = "\u0325" not in resp_lower and "\u0303" not in resp_lower
+        is_core_headword = is_clean_ascii_card and any(f"**{w}**" in resp_lower for w in CORE_BBADHA_WORDS)
+        if is_salutation or is_greeting:
+            salutation_lex.append(item)
+        elif is_rag or is_dda_qa:
+            rag_or_dda_lex.append(item)
+        elif is_core_headword:
+            core_headword_lex.append(item)
+        elif is_clean_ascii_card:
+            other_lex.append(item)
+
+    if len(core_headword_lex) > max_core:
+        core_headword_lex = random.sample(core_headword_lex, max_core)
+    sampled_other = other_lex if len(other_lex) <= max_other else random.sample(other_lex, max_other)
+    picked: List[Dict[str, Any]] = []
+    picked.extend(salutation_lex * sal_mult)
+    picked.extend(rag_or_dda_lex)
+    picked.extend(core_headword_lex)
+    picked.extend(sampled_other)
+    return picked
+
+
 def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> List[Dict[str, Any]]:
     """Loads the target SautiLM JSONL corpus and balances domains for clean SFT without cross-leakage."""
     target = variant_cfg["target"]
@@ -175,67 +251,50 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
     if target != "jua":
         all_rows = [item for items in by_domain.values() for item in items]
         if target == "lex":
-            by_domain = {"lex": all_rows}
-        else:
-            repeat = 1 if len(all_rows) >= 450 else min(3, max(1, 500 // max(1, len(all_rows))))
-            curated.extend(all_rows * repeat)
+            curated = _select_clean_lex_rows(all_rows, max_core=260, max_other=240, sal_mult=3)
             random.shuffle(curated)
-            print(
-                f"[SautiLM-Forge] Standalone specialty '{variant_cfg['model_name']}': "
-                f"{len(curated)} rows ({len(all_rows)} unique x {repeat})"
-            )
+            print(f"[SautiLM-Forge] Standalone specialty 'SautiLM-Jua-Lex': {len(curated)} clean rows")
             return curated
+        repeat = 1 if len(all_rows) >= 350 else min(3, max(1, 450 // max(1, len(all_rows))))
+        curated.extend(all_rows * repeat)
+        random.shuffle(curated)
+        print(
+            f"[SautiLM-Forge] Standalone specialty '{variant_cfg['model_name']}': "
+            f"{len(curated)} rows ({len(all_rows)} unique x {repeat})"
+        )
+        return curated
 
-    # Full SautiLM-Jua foundation mix: balanced across cleanly separated domains (no Bbadha leaks outside lex)
+    # Full SautiLM-Jua foundation mix: prevent STEM (630) or Lex (22k) from overwhelming identity/Ius/Med/Agri
+    domain_caps = {
+        "identity": 240,
+        "ius": 260,
+        "med": 220,
+        "agri": 220,
+        "fin": 200,
+        "civ": 180,
+        "edu": 180,
+        "math": 200,
+        "voice": 140,
+        "vision": 160,
+        "stem": 220,
+    }
     for d, items in by_domain.items():
-        if d != "lex":
-            mult = 2 if len(items) >= 120 else 3
-            curated.extend(items * mult)
-
-    # For lex: prioritize RAG-grounded entries, greetings/salutations, natural Q&As, and core Bbadha cards
-    lex_items = by_domain.get("lex", [])
-    rag_or_dda_lex: List[Dict[str, Any]] = []
-    core_headword_lex: List[Dict[str, Any]] = []
-    other_lex: List[Dict[str, Any]] = []
-    for item in lex_items:
-        sys_lower = str(item.get("system", "")).lower()
-        prompt_lower = str(item.get("prompt", "")).lower()
-        resp_lower = str(item.get("response", "")).lower()
-        is_salutation = any(
-            k in resp_lower for k in ("dyiná blĩ", "mbăi dyiná", "ndré dzo", "kūná bù", "mbăi bbo")
-        )
-        is_greeting = len(prompt_lower.strip()) <= 20 and (
-            "sautilm-jua-lex" in resp_lower
-            or "sautilm-lex" in resp_lower
-            or "hello" in resp_lower
-            or "bonjour" in resp_lower
-            or "habari" in resp_lower
-        )
-        is_rag = "dictionnaire bbadha verifie" in sys_lower
-        is_dda_qa = ("dda" in prompt_lower or "ddà" in prompt_lower) and (
-            "**ddà**" in resp_lower or "ddà" in resp_lower
-        )
-        is_core_headword = any(f"**{w}**" in resp_lower for w in CORE_BBADHA_WORDS)
-        if is_salutation or is_greeting or is_rag or is_dda_qa:
-            rag_or_dda_lex.append(item)
-        elif is_core_headword:
-            core_headword_lex.append(item)
+        if d == "lex":
+            continue
+        cap = domain_caps.get(d, 200)
+        if len(items) >= cap:
+            curated.extend(random.sample(items, cap))
         else:
-            other_lex.append(item)
+            mult = min(4, max(1, cap // max(1, len(items))))
+            curated.extend((items * mult)[:cap])
 
-    if len(core_headword_lex) > 450:
-        core_headword_lex = random.sample(core_headword_lex, 450)
-    curated.extend(rag_or_dda_lex * 2)
-    curated.extend(core_headword_lex)
-    target_other = min(750, max(350, 3800 - len(curated)))
-    sampled_other = other_lex if len(other_lex) <= target_other else random.sample(other_lex, target_other)
-    curated.extend(sampled_other)
+    clean_lex = _select_clean_lex_rows(by_domain.get("lex", []), max_core=100, max_other=80, sal_mult=2)
+    curated.extend(clean_lex)
 
     random.shuffle(curated)
     print(
-        f"[SautiLM-Forge] Curated {variant_cfg['model_name']} dataset: {len(curated)} rows "
-        f"(rag_salutation={len(rag_or_dda_lex)}x2, core_headword={len(core_headword_lex)}, "
-        f"sampled_other_lex={len(sampled_other)})"
+        f"[SautiLM-Forge] Balanced {variant_cfg['model_name']} dataset: {len(curated)} rows "
+        f"(clean_lex={len(clean_lex)})"
     )
     return curated
 
@@ -468,9 +527,67 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
     if target == "stem":
         return stem_suite
 
+    med_suite = [
+        ("med_identity_fr", None, "Qui es-tu ?", lambda t: ("sautilm-jua-med" in t or "afyaspeak" in t or "losingtek" in t) and "bbadha" not in t),
+        ("med_identity_en", None, "Who are you?", lambda t: ("sautilm-jua-med" in t or "afyaspeak" in t or "losingtek" in t) and "bbadha" not in t),
+        ("med_cholera_fr", None, "Quelles sont les 3 étapes essentielles pour purifier l'eau et prévenir le choléra ?", lambda t: ("filtr" in t or "bouillir" in t or "chlore" in t) and "savon" in t and "bbadha" not in t),
+        ("med_ors_en", None, "How to treat diarrhea dehydration with Oral Rehydration Salts (ORS) and zinc?", lambda t: ("1 liter" in t or "clean" in t) and "ors" in t and "zinc" in t and "bbadha" not in t),
+        ("med_malaria_fr", None, "Quels sont les signes d'alerte du paludisme grave chez l'enfant ?", lambda t: ("convulsions" in t or "fièvre" in t or "pâleur" in t) and ("tdr" in t or "artésunate" in t or "centre de santé" in t)),
+        ("med_burn_fr", None, "Quels sont les premiers secours devant une brûlure thermique récente ?", lambda t: ("eau" in t or "15" in t or "20" in t) and ("beurre" in t or "huile" in t or "dentifrice" in t)),
+        ("med_snake_fr", None, "Que faire en cas de morsure de serpent en zone rurale ?", lambda t: ("immobiliser" in t or "hôpital" in t or "antivenin" in t) and ("inciser" in t or "aspirer" in t or "garrot" in t)),
+        ("med_muac_fr", None, "Comment interpréter le périmètre brachial (PB / MUAC) pour dépister la malnutrition aiguë chez l'enfant de 6 à 59 mois ?", lambda t: ("125" in t or "115" in t) and ("rouge" in t or "vert" in t)),
+    ]
+    if target == "med":
+        return med_suite
+
+    agri_suite = [
+        ("agri_identity_fr", None, "Qui es-tu ?", lambda t: ("sautilm" in t or "losingtek" in t) and "bbadha" not in t),
+        ("agri_identity_en", None, "Who are you?", lambda t: ("sautilm" in t or "losingtek" in t) and "bbadha" not in t),
+        ("agri_cassava_fr", None, "Comment distinguer la mosaïque du manioc (CMD) de la striure brune du manioc (CBSD) au champ ?", lambda t: ("mosaïque" in t or "cmd" in t) and ("cbsd" in t or "racines" in t or "nervures" in t) and "bbadha" not in t),
+        ("agri_faw_fr", None, "Comment identifier et lutter contre la chenille légionnaire d'automne (Spodoptera frugiperda) sur le maïs ?", lambda t: ("cendre" in t or "neem" in t or "cornet" in t or "push-pull" in t) and "bbadha" not in t),
+        ("agri_bxw_fr", None, "Quels sont les symptômes du flétrissement bactérien du bananier (BXW / Xanthomonas) et comment stopper sa propagation ?", lambda t: ("bourgeon" in t or "feu" in t or "javel" in t) and "bbadha" not in t),
+        ("agri_compost_fr", None, "Comment réussir un compost organique riche en nutriments en 8 à 12 semaines ?", lambda t: ("carbone" in t or "azote" in t or "brunes" in t) and ("2 à 3" in t or "retourner" in t)),
+        ("agri_pics_fr", None, "Comment sécher et stocker le maïs ou les haricots sans produits chimiques pour éviter les charançons ?", lambda t: ("12" in t or "13" in t) and ("pics" in t or "hermétique" in t)),
+        ("agri_rotation_en", None, "Why does rotating maize with legumes like beans or groundnuts raise future maize yields?", lambda t: ("nitrogen" in t or "rhizobium" in t) and ("legume" in t or "soil" in t)),
+    ]
+    if target == "agri":
+        return agri_suite
+
+    ius_suite = [
+        ("ius_identity_fr", None, "Qui es-tu ?", lambda t: ("sautilm-jua-ius" in t or "losingtek" in t) and "bbadha" not in t),
+        ("ius_identity_en", None, "Who are you?", lambda t: ("sautilm-jua-ius" in t or "losingtek" in t) and "bbadha" not in t),
+        ("ius_art1_fr", None, "Que dit l'Article 1 de la Constitution de la RDC ?", lambda t: ("30 juin 1960" in t or "état de droit" in t) and ("justice - paix - travail" in t or "kinshasa" in t) and "gdrà" not in t),
+        ("ius_garde_a_vue", None, "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?", lambda t: "48 heures" in t and ("parquet" in t or "avocat" in t) and "présumée innocente" in t),
+        ("ius_custody_en", None, "What does the DRC Constitution say about the 48-hour police custody limit?", lambda t: "48 hours" in t and ("parquet" in t or "lawyer" in t or "counsel" in t)),
+        ("ius_marriage_fr", None, "Quelles sont les conditions de validité du mariage selon le Code de la Famille révisé (Loi n° 16/008) ?", lambda t: "18 ans" in t and "consentement" in t and ("dot" in t or "état civil" in t)),
+        ("ius_succession_fr", None, "Comment sont réparties les successions ab intestat et comment la veuve est-elle protégée en RDC ?", lambda t: "3/4" in t and "usufruit" in t and ("spoliation" in t or "veuve" in t)),
+        ("ius_ohada_fr", None, "Quelles formes de sociétés commerciales sont reconnues en RDC sous l'Acte uniforme OHADA (AUSCGIE) ?", lambda t: "sarl" in t and "sas" in t and "rccm" in t),
+    ]
+    if target == "ius":
+        return ius_suite
+
+    lex_suite = [
+        ("lex_dda_fr", None, "Que signifie le mot Bbadha Dda ?", lambda t: ("eau" in t or "rivière" in t or "maji" in t) and ("long" in t or "loin" in t)),
+        ("lex_dda_en", None, "Explain the Bbadha word ddà", lambda t: ("water" in t or "river" in t) and ("far" in t or "long" in t)),
+        ("lex_dda_sw", None, "Tafsiri neno la Kibbadha: dda", lambda t: ("maji" in t or "mto" in t) and ("mbali" in t or "refu" in t)),
+        ("lex_bonne_journee", None, "Comment dire bonne journée en Bbadha ?", lambda t: "dyiná blĩ" in t or "mbăi dyiná" in t or "ddyè bblò" in t),
+        ("lex_bonjour", None, "Comment dit-on bonjour et comment vas-tu en Bbadha ?", lambda t: ("mbăi" in t or "bǒsò" in t) and "a ba ngbà" in t),
+        ("lex_bonsoir", None, "Comment dit-on bonsoir et bonne nuit en Bbadha ?", lambda t: "ndré dzo" in t and "kūná bù" in t),
+        ("lex_merci", None, "Comment dire merci et merci beaucoup en Bbadha ?", lambda t: "mbăi" in t and "mbăi bbo" in t),
+        (
+            "lex_rag_dda",
+            "Tu es SautiLM-Lex, assistant lexicographique hors-ligne de SautiLM. Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
+            "DICTIONNAIRE BBADHA VERIFIE: Mot: ddà | Grammaire: Terme lexical | Kiswahili: maji, kuwa refu | Francais: l'eau, la rivière, -loin.",
+            "Que signifie le mot Bbadha ddà ?",
+            lambda t: ("eau" in t or "rivière" in t) and "maji" in t and "chien" not in t,
+        ),
+    ]
+    if target == "lex":
+        return lex_suite
+
     full_jua_suite = [
-        ("identity_fr", None, "Qui es-tu et qui t'a créé ?", lambda t: ("sautilm" in t or "losingtek" in t) and "rossi" not in t and "core" not in t),
-        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?", lambda t: ("sautilm" in t or "losingtek" in t) and "openai" not in t and "core" not in t),
+        ("identity_fr", None, "Qui es-tu et qui t'a créé ?", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-lex" not in t and "core" not in t),
+        ("identity_en", None, "Who are you? Are you Gemma or ChatGPT?", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-jua-stem" not in t and "laurent" not in t and "core" not in t),
         ("identity_georges", None, "Qui est Georges Byona ?", lambda t: "georges byona" in t and "losingtek" in t and "nuru ai" not in t),
         (
             "greeting_fin_hey",
@@ -491,7 +608,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "ius_art1_fr",
             "Tu es SautiLM-Jua-Ius, assistant juridique hors-ligne de droit congolais (RDC). Réponds clairement en français.",
             "Que dit l'Article 1 de la Constitution de la RDC ?",
-            lambda t: ("état de droit" in t or "etat de droit" in t or "souverain" in t or "kinshasa" in t or "franc congolais" in t) and "ohada" not in t,
+            lambda t: ("30 juin 1960" in t or "état de droit" in t or "etat de droit" in t) and ("justice" in t or "kinshasa" in t or "franc congolais" in t) and "gdrà" not in t and "ohada" not in t,
         ),
         (
             "ius_garde_a_vue",
@@ -503,7 +620,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "ius_custody_en",
             "You are SautiLM-Jua-Ius, an offline Congolese Law & Justice assistant by LosingTek Research. Answer accurately in English.",
             "What does the DRC Constitution say about the 48-hour police custody limit?",
-            lambda t: "48" in t and ("constitution" in t or "lawyer" in t or "art" in t) and "480" not in t,
+            lambda t: "48" in t and ("constitution" in t or "lawyer" in t or "parquet" in t or "art" in t) and "480" not in t,
         ),
         (
             "fin_avec_en",
@@ -527,7 +644,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "math_pastoral",
             None,
             "Un éleveur en Ituri possède 12 vaches. Il en achète 8 de plus, puis en vend 5 au marché. Combien lui en reste-t-il ?",
-            lambda t: "15" in t and "bbadha" not in t and "dyà" not in t,
+            lambda t: bool(re.search(r"\b15\b", t)) and "bbadha" not in t and "dyà" not in t,
         ),
         (
             "med_cholera",
@@ -544,10 +661,6 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         return full_jua_suite
 
     prefix_map = {
-        "lex": ("lex_",),
-        "med": ("med_",),
-        "agri": ("agri_",),
-        "ius": ("ius_",),
         "fin": ("fin_", "greeting_fin"),
         "civ": ("civ_",),
         "edu": ("stem_", "math_"),
@@ -558,14 +671,20 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
 
 
 def _score_runtime_outputs(outputs: Dict[str, str], target: str = "jua") -> tuple[int, int]:
-    """Scores grounded factual accuracy & zero-leakage compliance for the target suite."""
+    """Scores grounded factual accuracy, zero-script-hallucination, and zero-loop compliance."""
     suite = _runtime_suite_for_target(target)
     score = 0
     for key, _, _, predicate in suite:
         txt = (outputs.get(key) or "").lower()
         words = txt.split()
         unique_ratio = (len(set(words)) / len(words)) if words else 0.0
-        clean_tokens = "<pad>" not in txt and not _has_cjk(txt) and len(words) >= 4 and unique_ratio >= 0.30
+        clean_tokens = (
+            "<pad>" not in txt
+            and not _has_unexpected_script(txt)
+            and not _has_repetition_loop(txt)
+            and len(words) >= 4
+            and unique_ratio >= 0.30
+        )
         if clean_tokens and predicate(txt):
             score += 1
     return score, len(suite)
@@ -593,8 +712,8 @@ def run_litert_lm_runtime_checks(litertlm_path: Path, target: str = "jua") -> Di
                 reply = "".join(str(chunk) for chunk in conv.send_message_async(user_prompt)).strip()
             outputs[key] = reply
             print(f"\n[LiteRT-LM LIVE CHECK ({target}): {key}]\nPrompt: {user_prompt}\nOutput: {reply[:400]}...")
-            if not reply or "<pad>" in reply or _has_cjk(reply):
-                raise RuntimeError(f"LiteRT-LM failed sanity check (empty, <pad>, or CJK leakage) on: {key}")
+            if not reply or "<pad>" in reply:
+                raise RuntimeError(f"LiteRT-LM failed sanity check (empty or <pad>) on: {key}")
 
     return outputs
 
@@ -783,7 +902,7 @@ def main():
     peft_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
-        lora_dropout=0.05,
+        lora_dropout=0.08,
         bias="none",
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         task_type="CAUSAL_LM",
@@ -795,14 +914,21 @@ def main():
     batch_size = 2 if device_str == "cuda" else 1
     grad_accum = 8 if device_str == "cuda" else 1
     effective_bs = batch_size * grad_accum
-    is_standalone = variant_cfg["target"] != "jua"
-    num_epochs = 2 if device_str == "cuda" else 1
+    target_key = variant_cfg["target"]
+    if device_str != "cuda":
+        num_epochs = 1
+    elif target_key in ("stem", "med", "agri", "ius"):
+        num_epochs = 3
+    else:
+        num_epochs = 2
     total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
-    lr = 6e-5 if is_standalone else 1.2e-4
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.02)
+    lr_by_target = {"stem": 9e-5, "med": 8e-5, "agri": 8e-5, "ius": 8e-5, "lex": 8.5e-5, "jua": 8.5e-5}
+    lr = lr_by_target.get(target_key, 8e-5)
+    print(f"[SautiLM-Forge] Hyperparams: target={target_key} | epochs={num_epochs} | steps={total_steps} | lr={lr}")
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.03)
 
     def lr_lambda(step_idx: int) -> float:
         warmup = max(10, int(0.08 * total_steps))

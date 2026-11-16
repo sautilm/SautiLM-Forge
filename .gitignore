@@ -31,8 +31,7 @@ build/
 dist/
 models/
 checkpoints/
-kaggle_output/*_lora_adapter/
-kaggle_output/stem/
+kaggle_output/*/
 kaggle_output/*.log
 kaggle_probe_lora/
 kaggle_probe_lora_cpu/
