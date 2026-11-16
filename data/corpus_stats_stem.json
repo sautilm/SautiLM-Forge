@@ -2,13 +2,13 @@
   "model_series": "SautiLM-Jua-STEM",
   "target": "stem",
   "lexicon_count": 0,
-  "total_instructions": 630,
+  "total_instructions": 750,
   "domain_counts": {
-    "stem": 630
+    "stem": 750
   },
   "train_jsonl_path": "data/sautilm_jua_stem_train.jsonl",
   "lang_counts": {
-    "fr": 378,
-    "en": 252
+    "fr": 450,
+    "en": 300
   }
 }

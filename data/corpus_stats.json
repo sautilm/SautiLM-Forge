@@ -2,11 +2,11 @@
   "model_series": "SautiLM-Jua",
   "target": "jua",
   "lexicon_count": 1150,
-  "total_instructions": 23876,
+  "total_instructions": 23996,
   "domain_counts": {
     "identity": 72,
     "lex": 22402,
-    "stem": 630,
+    "stem": 750,
     "math": 89,
     "edu": 54,
     "med": 124,

@@ -251,11 +251,11 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
     if target != "jua":
         all_rows = [item for items in by_domain.values() for item in items]
         if target == "lex":
-            curated = _select_clean_lex_rows(all_rows, max_core=260, max_other=240, sal_mult=3)
+            curated = _select_clean_lex_rows(all_rows, max_core=280, max_other=260, sal_mult=4)
             random.shuffle(curated)
             print(f"[SautiLM-Forge] Standalone specialty 'SautiLM-Jua-Lex': {len(curated)} clean rows")
             return curated
-        repeat = 1 if len(all_rows) >= 350 else min(3, max(1, 450 // max(1, len(all_rows))))
+        repeat = 1 if len(all_rows) >= 420 else min(5, max(1, 450 // max(1, len(all_rows))))
         curated.extend(all_rows * repeat)
         random.shuffle(curated)
         print(
@@ -467,25 +467,25 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "stem_identity_fr",
             None,
             "Qui es-tu et quel niveau scolaire couvres-tu ?",
-            lambda t: ("sautilm" in t or "losingtek" in t) and ("secondaire" in t or "examen" in t or "stem" in t) and "bbadha" not in t,
+            lambda t: "sautilm-jua-stem" in t and ("secondaire" in t or "examen" in t) and "je suis math" not in t and "je suis **math**" not in t and "bbadha" not in t,
         ),
         (
             "stem_quad_fr",
             None,
             "Résous dans R l'équation du second degré : 2x^2 - 4x - 6 = 0 (Examen d'État).",
-            lambda t: ("64" in t or "delta" in t) and bool(re.search(r"\b3\b", t)) and "-1" in t and "bbadha" not in t and "4500" not in t,
+            lambda t: ("64" in t or "delta" in t) and bool(re.search(r"\b3\b", t)) and "-1" in t and "x = 6" not in t and "bbadha" not in t and "4500" not in t,
         ),
         (
             "stem_integral_fr",
             None,
             "Calcule l'intégrale de sinus x divisé par cosinus x dx étape par étape.",
-            lambda t: ("ln" in t and "cos" in t) and "bbadha" not in t and "4500" not in t,
+            lambda t: ("ln" in t and "cos" in t) and "cosinus(0)" not in t and "bbadha" not in t and "4500" not in t,
         ),
         (
             "stem_qcm_math_fr",
             None,
             "QCM Maths : Pour l'équation x^2 - 5x + 6 = 0, quelles sont les solutions ? A) {-2; -3}  B) {2; 3}  C) {1; 6}  D) {-1; 6}.",
-            lambda t: bool(re.search(r"\bb\)", t) or "bonne réponse : b" in t or "bonne reponse : b" in t) and bool(re.search(r"\b2\b", t)) and bool(re.search(r"\b3\b", t)),
+            lambda t: (bool(re.search(r"\bb\)", t)) or "bonne réponse : b" in t or "bonne reponse : b" in t) and bool(re.search(r"\b2\b", t)) and bool(re.search(r"\b3\b", t)) and "(-1 ; 3)" not in t and "newton-macmahon" not in t,
         ),
         (
             "stem_phys_ohm_en",
@@ -509,7 +509,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "stem_chem_ph_en",
             None,
             "QCM Chemistry: A solution has pH = 3 at 25 C. How is it classified? A) Basic  B) Neutral  C) Acidic  D) Salt.",
-            lambda t: ("c)" in t or "acid" in t) and "making them basic" not in t,
+            lambda t: ("c)" in t or "correct answer: c" in t or "correct answer c)" in t) and "acid" in t and "d) salt" not in t and "making them basic" not in t,
         ),
         (
             "stem_bio_photo_en",
@@ -703,7 +703,7 @@ def run_litert_lm_runtime_checks(litertlm_path: Path, target: str = "jua") -> Di
                 if sys_prompt
                 else None
             )
-            sampler = litert_lm.SamplerConfig(top_k=32, top_p=0.90, temperature=0.15, seed=42)
+            sampler = litert_lm.SamplerConfig(top_k=16, top_p=0.90, temperature=0.05, seed=42)
             with engine.create_conversation(
                 messages=init_messages,
                 sampler_config=sampler,
@@ -897,12 +897,12 @@ def main():
         device_map={"": 0} if device_str == "cuda" else None,
     )
 
-    lora_r = 16
-    lora_alpha = 32
+    lora_r = 32
+    lora_alpha = 64
     peft_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
-        lora_dropout=0.08,
+        lora_dropout=0.04,
         bias="none",
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         task_type="CAUSAL_LM",
@@ -918,17 +918,17 @@ def main():
     if device_str != "cuda":
         num_epochs = 1
     elif target_key in ("stem", "med", "agri", "ius"):
-        num_epochs = 3
+        num_epochs = 5
     else:
-        num_epochs = 2
+        num_epochs = 3
     total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
-    lr_by_target = {"stem": 9e-5, "med": 8e-5, "agri": 8e-5, "ius": 8e-5, "lex": 8.5e-5, "jua": 8.5e-5}
-    lr = lr_by_target.get(target_key, 8e-5)
+    lr_by_target = {"stem": 1.35e-4, "med": 1.2e-4, "agri": 1.2e-4, "ius": 1.2e-4, "lex": 1.1e-4, "jua": 1.05e-4}
+    lr = lr_by_target.get(target_key, 1.1e-4)
     print(f"[SautiLM-Forge] Hyperparams: target={target_key} | epochs={num_epochs} | steps={total_steps} | lr={lr}")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.03)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.015)
 
     def lr_lambda(step_idx: int) -> float:
         warmup = max(10, int(0.08 * total_steps))
