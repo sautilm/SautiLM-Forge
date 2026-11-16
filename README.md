@@ -58,6 +58,8 @@ SautiLM-Forge/
 ```
 
 > **Data Sovereignty & IP Protection Note**: To protect community linguistic assets and prevent unauthorized scraping, the full 1,150-word Bbadha JSON dictionary and the 35 MB `sautilm_v1_train.jsonl` corpus are excluded from public Git tracking via `.gitignore`. Only `data/sample_train_schema.jsonl` and `data/corpus_stats.json` are versioned publicly.
+>
+> **Android On-Device Deployment Note (`sautilm-jua.litertlm`)**: On Android 11+, `Flutter/sautilm` stores `sautilm-jua.litertlm` inside an invisible private vault (`noBackupFilesDir/sautilm_models/`) exposed read-only to LosingTek / partner apps via `content://com.losingtek.sautilm.modelprovider/models/` (`0 KB` network re-download, Play Store compliant — **Option 1**), while also supporting `/storage/emulated/0/.SautiLM/models/` with `.nomedia` (`MANAGE_EXTERNAL_STORAGE`) for zero-copy field tablet deployments (**Option 2**).
 
 ---
 
