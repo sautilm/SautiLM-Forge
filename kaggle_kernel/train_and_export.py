@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import shutil
 import struct
 import subprocess
@@ -176,7 +177,7 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
         if target == "lex":
             by_domain = {"lex": all_rows}
         else:
-            repeat = max(1, min(6, 960 // max(1, len(all_rows))))
+            repeat = 1 if len(all_rows) >= 450 else min(3, max(1, 500 // max(1, len(all_rows))))
             curated.extend(all_rows * repeat)
             random.shuffle(curated)
             print(
@@ -413,55 +414,55 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
             "stem_quad_fr",
             None,
             "Résous dans R l'équation du second degré : 2x^2 - 4x - 6 = 0 (Examen d'État).",
-            lambda t: ("64" in t or "delta" in t) and "3" in t and "-1" in t and "bbadha" not in t and "4500" not in t,
+            lambda t: ("64" in t or "delta" in t) and bool(re.search(r"\b3\b", t)) and "-1" in t and "bbadha" not in t and "4500" not in t,
         ),
         (
             "stem_integral_fr",
             None,
             "Calcule l'intégrale de sinus x divisé par cosinus x dx étape par étape.",
-            lambda t: ("ln" in t or "cos" in t) and "bbadha" not in t and "4500" not in t,
+            lambda t: ("ln" in t and "cos" in t) and "bbadha" not in t and "4500" not in t,
         ),
         (
             "stem_qcm_math_fr",
             None,
             "QCM Maths : Pour l'équation x^2 - 5x + 6 = 0, quelles sont les solutions ? A) {-2; -3}  B) {2; 3}  C) {1; 6}  D) {-1; 6}.",
-            lambda t: ("b)" in t or "b " in t or "bonne réponse : b" in t) and "2" in t and "3" in t,
+            lambda t: bool(re.search(r"\bb\)", t) or "bonne réponse : b" in t or "bonne reponse : b" in t) and bool(re.search(r"\b2\b", t)) and bool(re.search(r"\b3\b", t)),
         ),
         (
             "stem_phys_ohm_en",
             None,
             "A resistor of 12 ohms carries a current of 2 A. Calculate the voltage using Ohm's law step by step.",
-            lambda t: "24" in t and ("volt" in t or "v" in t),
+            lambda t: bool(re.search(r"\b24\s*\*?\*?\s*(?:v|volt|volts)\b", t)) and "= 2 v" not in t and "24 a" not in t,
         ),
         (
             "stem_phys_newton_fr",
             None,
             "Un corps de masse 5 kg subit une accélération de 3 m/s^2. Calcule la force résultante.",
-            lambda t: "15" in t and ("newton" in t or " n" in t),
+            lambda t: bool(re.search(r"\b15\s*\*?\*?\s*(?:n|newton)\b", t)),
         ),
         (
             "stem_chem_mole_fr",
             None,
             "Calcule le nombre de moles contenues dans 36 g d'eau H2O (M = 18 g/mol).",
-            lambda t: "2" in t and "mol" in t,
+            lambda t: bool(re.search(r"\b2(?:\.0|,0)?\s*\*?\*?\s*mol(?:e|es)?\b", t)),
         ),
         (
             "stem_chem_ph_en",
             None,
             "QCM Chemistry: A solution has pH = 3 at 25 C. How is it classified? A) Basic  B) Neutral  C) Acidic  D) Salt.",
-            lambda t: ("c)" in t or "acid" in t),
+            lambda t: ("c)" in t or "acid" in t) and "making them basic" not in t,
         ),
         (
             "stem_bio_photo_en",
             None,
             "In secondary Biology, explain the role of chlorophyll and write the products of photosynthesis.",
-            lambda t: ("chlorophyll" in t or "chloroplast" in t) and ("glucose" in t or "oxygen" in t or "o2" in t),
+            lambda t: ("chlorophyll" in t or "chloroplast" in t) and ("glucose" in t or "oxygen" in t or "o2" in t) and "choropleth" not in t,
         ),
         (
             "stem_bio_mitosis_fr",
             None,
             "QCM Biologie : Quel type de division cellulaire conserve le même nombre de chromosomes 2n ? A) Méiose  B) Mitose  C) Fécondation  D) Osmose.",
-            lambda t: "mitose" in t and ("b)" in t or "bonne réponse" in t or "2n" in t),
+            lambda t: "mitose" in t and ("b) mitose" in t or "bonne réponse : b" in t or "bonne reponse : b" in t) and "bonne réponse : c" not in t and "bonne réponse : a" not in t,
         ),
     ]
     if target == "stem":
@@ -794,12 +795,14 @@ def main():
     batch_size = 2 if device_str == "cuda" else 1
     grad_accum = 8 if device_str == "cuda" else 1
     effective_bs = batch_size * grad_accum
-    num_epochs = (3 if len(encoded_examples) <= 1500 else 2) if device_str == "cuda" else 1
+    is_standalone = variant_cfg["target"] != "jua"
+    num_epochs = 2 if device_str == "cuda" else 1
     total_steps = max(1, (len(encoded_examples) // effective_bs) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1.2e-4, weight_decay=0.02)
+    lr = 6e-5 if is_standalone else 1.2e-4
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.02)
 
     def lr_lambda(step_idx: int) -> float:
         warmup = max(10, int(0.08 * total_steps))

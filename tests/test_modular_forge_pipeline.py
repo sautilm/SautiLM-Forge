@@ -35,7 +35,7 @@ class TestModularForgePipeline(unittest.TestCase):
             build_target_corpus("stem", data_dir)
             cfg = resolve_variant_config(data_dir, "sautilm-jua-stem")
             rows = load_and_balance_dataset(data_dir, cfg)
-            self.assertGreaterEqual(len(rows), 700)
+            self.assertGreaterEqual(len(rows), 600)
             for row in rows:
                 self.assertEqual(row["domain"], "stem")
 
@@ -58,13 +58,15 @@ class TestModularForgePipeline(unittest.TestCase):
         self.assertEqual(score, 10)
         self.assertEqual(total, 10)
 
-        # CJK leakage or Bbadha hallucination must fail the affected checks
+        # CJK leakage, Bbadha hallucination, or list-numbering false positives must fail
         self.assertTrue(_has_cjk("Articles du 掛け legaux"))
         corrupted = dict(clean_outputs)
         corrupted["stem_quad_fr"] = "Vocabulaire Bbadha : Delta = 64, x1 = 3, x2 = -1, 1 + 5 * 4500."
-        corrupted["stem_phys_ohm_en"] = "By Ohm's law 24 volt 掛け calculated."
+        corrupted["stem_phys_ohm_en"] = "By Ohm's law 24 A = 2 V and 掛け."
+        corrupted["stem_chem_mole_fr"] = "1. V = 0.36 L\n2. Formule\n3. Calcul: 1 mole d'eau."
+        corrupted["stem_bio_photo_en"] = "Choropleth Index uses chlorophyll to make glucose."
         bad_score, _ = _score_runtime_outputs(corrupted, target="stem")
-        self.assertEqual(bad_score, 8)
+        self.assertEqual(bad_score, 6)
 
     def test_orchestrator_target_config_and_model_card_naming(self):
         jua_cfg = _target_config("jua")

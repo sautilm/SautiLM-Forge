@@ -368,7 +368,7 @@ def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") 
 
 
 def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dict[str, Any]:
-    """Checks the status of the Kaggle GPU kernel and downloads outputs if complete."""
+    """Checks the status of the Kaggle GPU kernel and downloads outputs with safe partial-file resume."""
     cfg = _target_config(target)
     _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
@@ -388,18 +388,54 @@ def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dic
     if "complete" in status_str.lower():
         out_dir = _output_dir_for_target(cfg["target"])
         out_dir.mkdir(parents=True, exist_ok=True)
-        for old_name in (cfg["litertlm_filename"], "sautilm-v1.litertlm", "training_metrics.json"):
-            old_path = out_dir / old_name
-            if old_path.exists():
-                old_path.unlink()
-        escaped_litert = cfg["litertlm_filename"].replace(".", r"\.")
-        escaped_adapter = cfg["adapter_dirname"]
+        metrics_path = out_dir / "training_metrics.json"
+        prev_elapsed = None
+        if metrics_path.exists():
+            try:
+                prev_elapsed = json.loads(metrics_path.read_text(encoding="utf-8")).get("elapsed_seconds")
+            except Exception:
+                prev_elapsed = None
+
         api.kernels_output(
             kernel_ref,
             path=str(out_dir),
-            file_pattern=rf"^({escaped_litert}|sautilm-jua\.litertlm|sautilm-v1\.litertlm|training_metrics\.json|{escaped_adapter}/.*|sautilm_v1_lora_adapter/.*)$",
+            file_pattern=r"^training_metrics\.json$",
+            force=True,
             quiet=False,
         )
+        remote_metrics: Dict[str, Any] = {}
+        if metrics_path.exists():
+            try:
+                remote_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+            except Exception:
+                remote_metrics = {}
+
+        is_new_run = prev_elapsed is not None and remote_metrics.get("elapsed_seconds") != prev_elapsed
+        expected_bytes = remote_metrics.get("litertlm_size_bytes")
+        litert_path = out_dir / cfg["litertlm_filename"]
+        if litert_path.exists() and (
+            is_new_run or (expected_bytes is not None and litert_path.stat().st_size > int(expected_bytes))
+        ):
+            litert_path.unlink()
+
+        escaped_litert = cfg["litertlm_filename"].replace(".", r"\.")
+        escaped_adapter = cfg["adapter_dirname"]
+        pattern = rf"^({escaped_litert}|sautilm-jua\.litertlm|sautilm-v1\.litertlm|{escaped_adapter}/.*|sautilm_v1_lora_adapter/.*)$"
+        for attempt in range(1, 4):
+            try:
+                api.kernels_output(
+                    kernel_ref,
+                    path=str(out_dir),
+                    file_pattern=pattern,
+                    force=False,
+                    quiet=False,
+                )
+                break
+            except Exception as err:
+                if attempt == 3:
+                    raise
+                print(f"[SautiLM-Forge] Download attempt {attempt} interrupted ({err}); resuming...")
+                time.sleep(3)
         result["downloaded_to"] = str(out_dir)
     return result
 
