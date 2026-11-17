@@ -272,7 +272,7 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
             random.shuffle(curated)
             print(f"[SautiLM-Forge] Standalone specialty 'SautiLM-Jua-Lex': {len(curated)} clean rows")
             return curated
-        repeat = 1 if len(all_rows) >= 420 else min(5, max(1, 450 // max(1, len(all_rows))))
+        repeat = 1 if len(all_rows) >= 420 else min(6, max(1, 450 // max(1, len(all_rows))))
         curated.extend(all_rows * repeat)
         random.shuffle(curated)
         print(
@@ -571,13 +571,13 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         return agri_suite
 
     ius_suite = [
-        ("ius_identity_fr", None, "Qui es-tu ?", lambda t: ("sautilm-jua-ius" in t or "losingtek" in t) and "bbadha" not in t),
-        ("ius_identity_en", None, "Who are you?", lambda t: ("sautilm-jua-ius" in t or "losingtek" in t) and "bbadha" not in t),
-        ("ius_art1_fr", None, "Que dit l'Article 1 de la Constitution de la RDC ?", lambda t: ("30 juin 1960" in t or "état de droit" in t) and ("justice - paix - travail" in t or "kinshasa" in t) and "gdrà" not in t),
+        ("ius_identity_fr", None, "Qui es-tu ?", lambda t: "sautilm-jua-ius" in t and "losingtek" in t and "bbadha" not in t),
+        ("ius_identity_en", None, "Who are you?", lambda t: "sautilm-jua-ius" in t and "losingtek" in t and "bbadha" not in t),
+        ("ius_art1_fr", None, "Que dit l'Article 1 de la Constitution de la RDC ?", lambda t: "30 juin 1960" in t and "justice - paix - travail" in t and "debout congolais" in t and "parquet" not in t and "gdrà" not in t),
         ("ius_garde_a_vue", None, "Que dit la Constitution de la RDC sur la garde à vue et les droits de la défense ?", lambda t: "48 heures" in t and ("parquet" in t or "avocat" in t) and "présumée innocente" in t),
         ("ius_custody_en", None, "What does the DRC Constitution say about the 48-hour police custody limit?", lambda t: "48 hours" in t and ("parquet" in t or "lawyer" in t or "counsel" in t)),
-        ("ius_marriage_fr", None, "Quelles sont les conditions de validité du mariage selon le Code de la Famille révisé (Loi n° 16/008) ?", lambda t: "18 ans" in t and "consentement" in t and ("dot" in t or "état civil" in t)),
-        ("ius_succession_fr", None, "Comment sont réparties les successions ab intestat et comment la veuve est-elle protégée en RDC ?", lambda t: "3/4" in t and "usufruit" in t and ("spoliation" in t or "veuve" in t)),
+        ("ius_marriage_fr", None, "Quelles sont les conditions de validité du mariage selon le Code de la Famille révisé (Loi n° 16/008) ?", lambda t: "18 ans" in t and "consentement" in t and "officier de l'état civil" in t and "prêt" not in t),
+        ("ius_succession_fr", None, "Comment sont réparties les successions ab intestat et comment la veuve est-elle protégée en RDC ?", lambda t: "3/4" in t and "3ème catégorie" in t and "usufruit" in t and "spoliation" in t and "tombeau" not in t and "campane" not in t),
         ("ius_ohada_fr", None, "Quelles formes de sociétés commerciales sont reconnues en RDC sous l'Acte uniforme OHADA (AUSCGIE) ?", lambda t: "sarl" in t and "sas" in t and "rccm" in t),
     ]
     if target == "ius":
@@ -593,7 +593,7 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ("lex_merci", None, "Comment dire merci et merci beaucoup en Bbadha ?", lambda t: "mbăi" in t and "mbăi bbo" in t),
         (
             "lex_rag_dda",
-            "Tu es SautiLM-Lex, assistant lexicographique hors-ligne de SautiLM. Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
+            "Tu es SautiLM-Jua-Lex, assistant lexicographique hors-ligne de SautiLM. Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
             "DICTIONNAIRE BBADHA VERIFIE: Mot: ddà | Grammaire: Terme lexical | Kiswahili: maji, kuwa refu | Francais: l'eau, la rivière, -loin.",
             "Que signifie le mot Bbadha ddà ?",
             lambda t: ("eau" in t or "rivière" in t) and "maji" in t and "chien" not in t,
@@ -939,7 +939,9 @@ def main():
     target_key = variant_cfg["target"]
     if device_str != "cuda":
         num_epochs = 1
-    elif target_key in ("stem", "med", "agri", "ius", "jua"):
+    elif target_key == "ius":
+        num_epochs = 6
+    elif target_key in ("stem", "med", "agri", "jua"):
         num_epochs = 5
     else:
         num_epochs = 4
@@ -947,7 +949,7 @@ def main():
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
-    lr_by_target = {"stem": 1.35e-4, "med": 1.25e-4, "agri": 1.25e-4, "ius": 1.25e-4, "lex": 1.2e-4, "jua": 1.35e-4}
+    lr_by_target = {"stem": 1.35e-4, "med": 1.25e-4, "agri": 1.25e-4, "ius": 1.3e-4, "lex": 1.2e-4, "jua": 1.35e-4}
     lr = lr_by_target.get(target_key, 1.2e-4)
     print(f"[SautiLM-Forge] Hyperparams: target={target_key} | epochs={num_epochs} | steps={total_steps} | lr={lr}")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)

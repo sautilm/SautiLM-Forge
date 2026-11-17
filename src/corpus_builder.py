@@ -406,7 +406,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
                 instructions.append(
                     format_gemma3_turn(
                         f"Traduis cette phrase Bbadha en français et en kiswahili : \"{bb_s}\"",
-                        f"Traduction SautiLM-Lex (**{word}**) :\n\n"
+                        f"Traduction SautiLM-Jua-Lex (**{word}**) :\n\n"
                         f"- **Bbadha (Kilendu)** : {bb_s}\n"
                         f"- **Français** : {fr_s}\n"
                         f"- **Kiswahili** : {sw_s}",
@@ -417,7 +417,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
                 instructions.append(
                     format_gemma3_turn(
                         f"Tafsiri sentensi hii kwa Kibbadha na Kifaransa : \"{sw_s}\"",
-                        f"Tafsiri ya SautiLM-Lex (**{word}**) :\n\n"
+                        f"Tafsiri ya SautiLM-Jua-Lex (**{word}**) :\n\n"
                         f"- **Kibbadha (Kilendu)** : {bb_s}\n"
                         f"- **Kiswahili** : {sw_s}\n"
                         f"- **Kifaransa** : {fr_s}",
@@ -428,7 +428,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
 
         if sense_lines_fr:
             card_fr = (
-                f"### Fiche Lexicale SautiLM-Lex : **{word}**\n\n"
+                f"### Fiche Lexicale SautiLM-Jua-Lex : **{word}**\n\n"
                 f"- **Langue** : Bbadha (Kilendu - Ituri, Est de la RDC)\n"
                 f"- **Phonétique** : {phonetics}\n"
                 f"- **Grammaire** : {grammar}\n\n"
@@ -444,7 +444,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
             )
 
             card_sw = (
-                f"### Kamusi ya SautiLM-Lex : **{word}**\n\n"
+                f"### Kamusi ya SautiLM-Jua-Lex : **{word}**\n\n"
                 f"- **Lugha** : Kibbadha (Kilendu - Ituri, RDC)\n"
                 f"- **Matamshi** : {phonetics}\n"
                 f"- **Sarufi** : {grammar}\n\n"
@@ -462,7 +462,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
             # Ground model to strictly respect Flutter's DICTIONNAIRE BBADHA VERIFIE RAG context
             if word.lower() in core_words or idx < 80:
                 rag_sys = (
-                    "Tu es SautiLM-Lex, assistant lexicographique hors-ligne de SautiLM. "
+                    "Tu es SautiLM-Jua-Lex, assistant lexicographique hors-ligne de SautiLM. "
                     "Appuie-toi strictement sur le contexte vérifié ci-dessous.\n"
                     f"DICTIONNAIRE BBADHA VERIFIE: Mot: {word} | Grammaire: {grammar} | "
                     f"Kiswahili: {first_sw or '-'} | Francais: {first_fr or '-'}."
@@ -475,7 +475,7 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
                 instructions.append(
                     format_gemma3_turn(
                         f"Que signifie le mot Bbadha {word} ?",
-                        f"Selon le dictionnaire Bbadha vérifié (**SautiLM-Lex**), le mot **{word}** ({grammar}) signifie :\n\n"
+                        f"Selon le dictionnaire Bbadha vérifié (**SautiLM-Jua-Lex**), le mot **{word}** ({grammar}) signifie :\n\n"
                         f"- **Français** : {first_fr or '-'}\n"
                         f"- **Kiswahili** : {first_sw or '-'}{rag_ex}",
                         domain="lex",
@@ -1026,14 +1026,28 @@ def build_target_corpus(target: str, output_dir: Path) -> Dict[str, Any]:
             for r in (generate_greetings_and_multiturn() + generate_multilingual_domains_v11())
             if r.get("domain") == normalized
         ]
-        # Avoid dumping 15x duplicates when rich standalone specialty datasets already exist
-        base_specialty = (
-            generate_med_instructions()[:6] if normalized == "med"
-            else generate_agri_instructions()[:6] if normalized == "agri"
-            else generate_congolese_law_instructions()[:14] if normalized == "ius"
-            else []
-        )
-        instructions = domain_builders[normalized]() + base_specialty + supplement
+        # Avoid conflicting duplicate legal answers across modules: prioritize canonical specialty pairs first
+        if normalized == "ius":
+            merged_ius = (
+                domain_builders[normalized]()
+                + supplement
+                + generate_congolese_law_instructions()
+            )
+            seen_keys = set()
+            dedup_ius: List[Dict[str, Any]] = []
+            for r in merged_ius:
+                key = (bool((r.get("system") or "").strip()), str(r.get("prompt", "")).strip().lower())
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    dedup_ius.append(r)
+            instructions = dedup_ius
+        else:
+            base_specialty = (
+                generate_med_instructions()[:6] if normalized == "med"
+                else generate_agri_instructions()[:6] if normalized == "agri"
+                else []
+            )
+            instructions = domain_builders[normalized]() + base_specialty + supplement
         model_series = f"SautiLM-Jua-{normalized.upper() if normalized == 'stem' else normalized.capitalize()}"
         jsonl_name = f"sautilm_jua_{normalized}_train.jsonl"
         stats_name = f"corpus_stats_{normalized}.json"
