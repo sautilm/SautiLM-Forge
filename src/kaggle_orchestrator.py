@@ -328,8 +328,6 @@ def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") 
                 "Ensure training_metrics.json confirms litertlm_verified=True."
             )
         litertlm_file = out_dir / cfg["litertlm_filename"]
-        if not litertlm_file.exists() and cfg["target"] == "jua":
-            litertlm_file = out_dir / "sautilm-v1.litertlm"
         if not litertlm_file.exists():
             raise FileNotFoundError(f"No verified .litertlm bundle found in {out_dir}")
         print(f"[SautiLM-Forge] Uploading verified {litertlm_file.name} to {repo_id}...")
@@ -339,13 +337,6 @@ def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") 
             repo_id=repo_id,
             repo_type="model",
         )
-        if cfg["target"] == "jua":
-            hf_api.upload_file(
-                path_or_fileobj=str(litertlm_file),
-                path_in_repo="sautilm-v1.litertlm",
-                repo_id=repo_id,
-                repo_type="model",
-            )
         if metrics_file.exists():
             hf_api.upload_file(
                 path_or_fileobj=str(metrics_file),
