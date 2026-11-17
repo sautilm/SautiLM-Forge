@@ -2,9 +2,9 @@
   "model_series": "SautiLM-Jua-Ius",
   "target": "ius",
   "lexicon_count": 0,
-  "total_instructions": 85,
+  "total_instructions": 89,
   "domain_counts": {
-    "ius": 85
+    "ius": 89
   },
   "train_jsonl_path": "data/sautilm_jua_ius_train.jsonl"
 }

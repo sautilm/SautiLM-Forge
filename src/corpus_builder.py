@@ -1026,13 +1026,9 @@ def build_target_corpus(target: str, output_dir: Path) -> Dict[str, Any]:
             for r in (generate_greetings_and_multiturn() + generate_multilingual_domains_v11())
             if r.get("domain") == normalized
         ]
-        # Avoid conflicting duplicate legal answers across modules: prioritize canonical specialty pairs first
+        # Avoid conflicting duplicate legal answers across modules: keep canonical specialty & non-overlapping supplement
         if normalized == "ius":
-            merged_ius = (
-                domain_builders[normalized]()
-                + supplement
-                + generate_congolese_law_instructions()
-            )
+            merged_ius = domain_builders[normalized]() + supplement
             seen_keys = set()
             dedup_ius: List[Dict[str, Any]] = []
             for r in merged_ius:
