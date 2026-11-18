@@ -1,0 +1,19 @@
+{
+  "id": "georgesbyona/sautilm-nuru-agri-tflite-vision-gpu",
+  "title": "SautiLM Nuru Agri TFLite Vision GPU",
+  "code_file": "train_nuru_vision_kaggle.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "georgesbyona/sautilm-nuru-agri-dataset",
+    "emmarex/plantdisease",
+    "nirmalsankalana/cassava-leaf-disease-classification"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

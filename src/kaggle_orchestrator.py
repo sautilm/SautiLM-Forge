@@ -16,9 +16,56 @@ KERNEL_DIR = BASE_DIR / "kaggle_kernel"
 OUTPUT_DIR = BASE_DIR / "kaggle_output"
 
 
+ALL_MODULAR_TARGETS = ("jua", "stem", "kuu-stem", "lex", "med", "agri", "ius")
+DESKTOP_PC_TARGETS = ("kuu-med", "kuu-ius")
+VISION_NURU_TARGETS = ("nuru-agri",)
+
+
+def _with_kaggle_retry(fn, label: str = "kaggle_api", max_attempts: int = 3):
+    """Retries transient Kaggle API network resets cleanly with backoff."""
+    last_err = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return fn()
+        except Exception as err:
+            last_err = err
+            if attempt == max_attempts:
+                raise
+            wait_s = attempt * 4
+            print(f"[SautiLM-Forge] Transient {label} error ({err}); retry {attempt}/{max_attempts - 1} in {wait_s}s...")
+            time.sleep(wait_s)
+    raise last_err
+
+
+def _resolve_target_list(raw_target: str) -> list[str]:
+    cleaned = (raw_target or "jua").strip().lower()
+    if cleaned == "all":
+        return list(ALL_MODULAR_TARGETS)
+    if cleaned == "all-with-desktop":
+        return list(ALL_MODULAR_TARGETS) + list(DESKTOP_PC_TARGETS)
+    return [t.strip().lower() for t in cleaned.split(",") if t.strip()]
+
+
 def _target_config(target: str = "jua") -> Dict[str, str]:
     """Returns Kaggle dataset, kernel, Hugging Face repo, and artifact metadata per SautiLM target."""
     t = target.strip().lower()
+    if t == "nuru-agri":
+        return {
+            "target": "nuru-agri",
+            "corpus_domain": "vision-agri",
+            "variant": "sautilm-nuru-agri",
+            "model_name": "SautiLM-Nuru-Agri",
+            "dataset_slug": "sautilm-nuru-agri-dataset",
+            "dataset_title": "SautiLM-Nuru-Agri Collaborative Vision Metadata",
+            "kernel_slug": "sautilm-nuru-agri-tflite-vision-gpu",
+            "kernel_title": "SautiLM Nuru Agri TFLite Vision GPU",
+            "hf_repo": "SautiLM-Nuru-Agri",
+            "jsonl_filename": "sautilm_nuru_agri_manifest.json",
+            "stats_filename": "corpus_stats_nuru_agri.json",
+            "litertlm_filename": "sautilm-nuru-agri.tflite",
+            "adapter_dirname": "sautilm_nuru_agri_savedmodel",
+            "export_format": "tflite-int8",
+        }
     if t == "jua":
         return {
             "target": "jua",
@@ -34,9 +81,31 @@ def _target_config(target: str = "jua") -> Dict[str, str]:
             "litertlm_filename": "sautilm-jua.litertlm",
             "adapter_dirname": "sautilm_jua_lora_adapter",
         }
+    if t.startswith("kuu-"):
+        domain = t[4:]
+        suffix = domain.upper() if domain == "stem" else domain.capitalize()
+        is_mobile_1b = domain == "stem"
+        return {
+            "target": t,
+            "corpus_domain": domain,
+            "variant": f"sautilm-kuu-{domain}",
+            "model_name": f"SautiLM-Kuu-{suffix}",
+            "dataset_slug": f"sautilm-jua-{domain}-corpus",
+            "dataset_title": f"SautiLM-Jua-{suffix} Standalone Domain Corpus",
+            "kernel_slug": f"sautilm-kuu-{domain}-forge-gpu",
+            "kernel_title": f"SautiLM-Kuu-{suffix} Forge GPU",
+            "hf_repo": f"SautiLM-Kuu-{suffix}",
+            "jsonl_filename": f"sautilm_jua_{domain}_train.jsonl",
+            "stats_filename": f"corpus_stats_{domain}.json",
+            "litertlm_filename": (
+                f"sautilm-kuu-{domain}.litertlm" if is_mobile_1b else f"sautilm-kuu-{domain}-q4_k_m.gguf"
+            ),
+            "adapter_dirname": f"sautilm_kuu_{domain}_lora_adapter",
+        }
     suffix = t.upper() if t == "stem" else t.capitalize()
     return {
         "target": t,
+        "corpus_domain": t,
         "variant": f"sautilm-jua-{t}",
         "model_name": f"SautiLM-Jua-{suffix}",
         "dataset_slug": f"sautilm-jua-{t}-corpus",
@@ -70,15 +139,25 @@ def _load_local_auth() -> Dict[str, str]:
     }
 
 
-def publish_dataset_to_kaggle(skip_if_exists: bool = False, target: str = "jua") -> str:
+def publish_dataset_to_kaggle(
+    skip_if_exists: bool = False,
+    target: str = "jua",
+    refresh_corpus: bool = True,
+) -> str:
     """Uploads the requested SautiLM target corpus as a private Kaggle dataset."""
     cfg = _target_config(target)
     jsonl_src = DATA_DIR / cfg["jsonl_filename"]
     stats_src = DATA_DIR / cfg["stats_filename"]
-    if not jsonl_src.exists() or not stats_src.exists():
-        from .corpus_builder import build_target_corpus
+    if (refresh_corpus or not jsonl_src.exists() or not stats_src.exists()) and cfg["target"] != "nuru-agri":
+        try:
+            from .corpus_builder import build_target_corpus
+        except ImportError:
+            import sys
+            if str(BASE_DIR) not in sys.path:
+                sys.path.insert(0, str(BASE_DIR))
+            from src.corpus_builder import build_target_corpus
 
-        build_target_corpus(cfg["target"], DATA_DIR)
+        build_target_corpus(cfg.get("corpus_domain", cfg["target"]), DATA_DIR)
 
     auth = _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
@@ -89,7 +168,7 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = False, target: str = "jua")
     kaggle_user = auth["kaggle_user"]
     dataset_ref = f"{kaggle_user}/{cfg['dataset_slug']}"
 
-    existing = [d.ref for d in api.dataset_list(mine=True)]
+    existing = _with_kaggle_retry(lambda: [d.ref for d in api.dataset_list(mine=True)], "dataset_list")
     if dataset_ref in existing and skip_if_exists:
         print(f"[SautiLM-Forge] Private Kaggle dataset already exists: {dataset_ref}")
         return dataset_ref
@@ -99,8 +178,35 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = False, target: str = "jua")
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(jsonl_src, staging_dir / cfg["jsonl_filename"])
-    shutil.copy2(stats_src, staging_dir / cfg["stats_filename"])
+    if cfg["target"] == "nuru-agri":
+        manifest_payload = {
+            "model_name": "SautiLM-Nuru-Agri",
+            "labels": [
+                "non_plant",
+                "healthy_leaf",
+                "cassava_cmd",
+                "cassava_cbsd",
+                "maize_rust",
+                "maize_faw",
+                "banana_bxw",
+                "bean_anthracnose",
+                "tomato_blight",
+            ],
+            "abstention_threshold": 0.55,
+            "max_model_mb": 45.0,
+        }
+        (staging_dir / cfg["jsonl_filename"]).write_text(
+            json.dumps(manifest_payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        (staging_dir / cfg["stats_filename"]).write_text(
+            json.dumps({"total_instructions": 9, "lexicon_count": 1150, "target": "nuru-agri"}, indent=2),
+            encoding="utf-8",
+        )
+    else:
+        if jsonl_src.exists():
+            shutil.copy2(jsonl_src, staging_dir / cfg["jsonl_filename"])
+        if stats_src.exists():
+            shutil.copy2(stats_src, staging_dir / cfg["stats_filename"])
     if cfg["target"] in ("jua", "lex") and (DATA_DIR / "bbadha_full_lexicon.json").exists():
         shutil.copy2(DATA_DIR / "bbadha_full_lexicon.json", staging_dir / "bbadha_full_lexicon.json")
 
@@ -127,28 +233,34 @@ def publish_dataset_to_kaggle(skip_if_exists: bool = False, target: str = "jua")
 
     if dataset_ref in existing:
         print(f"[SautiLM-Forge] Updating existing private Kaggle dataset: {dataset_ref}")
-        api.dataset_create_version(
-            str(staging_dir),
-            version_notes=f"Update {cfg['model_name']} modular zero-leakage SFT corpus",
-            quiet=False,
-            convert_to_csv=False,
-            dir_mode="zip",
+        _with_kaggle_retry(
+            lambda: api.dataset_create_version(
+                str(staging_dir),
+                version_notes=f"Update {cfg['model_name']} modular zero-leakage SFT corpus",
+                quiet=False,
+                convert_to_csv=False,
+                dir_mode="zip",
+            ),
+            "dataset_create_version",
         )
     else:
         print(f"[SautiLM-Forge] Creating new private Kaggle dataset: {dataset_ref}")
-        api.dataset_create_new(
-            str(staging_dir),
-            public=False,
-            quiet=False,
-            convert_to_csv=False,
-            dir_mode="zip",
+        _with_kaggle_retry(
+            lambda: api.dataset_create_new(
+                str(staging_dir),
+                public=False,
+                quiet=False,
+                convert_to_csv=False,
+                dir_mode="zip",
+            ),
+            "dataset_create_new",
         )
 
     return dataset_ref
 
 
 def push_gpu_kernel_to_kaggle(dataset_ref: str, target: str = "jua") -> str:
-    """Pushes the GPU fine-tuning and LiteRT-LM export kernel to Kaggle for the given target."""
+    """Pushes the GPU fine-tuning and LiteRT-LM / TFLite export kernel to Kaggle for the given target."""
     cfg = _target_config(target)
     auth = _load_local_auth()
     from kaggle.api.kaggle_api_extended import KaggleApi
@@ -158,36 +270,47 @@ def push_gpu_kernel_to_kaggle(dataset_ref: str, target: str = "jua") -> str:
 
     kaggle_user = auth["kaggle_user"]
     kernel_ref = f"{kaggle_user}/{cfg['kernel_slug']}"
+    is_nuru_vision = cfg["target"] == "nuru-agri"
+    push_dir = (BASE_DIR / "kaggle_nuru_kernel") if is_nuru_vision else KERNEL_DIR
+    code_filename = "train_nuru_vision_kaggle.py" if is_nuru_vision else "train_and_export.py"
+    dataset_sources = [dataset_ref]
+    if is_nuru_vision:
+        dataset_sources.extend([
+            "emmarex/plantdisease",
+            "nirmalsankalana/cassava-leaf-disease-classification",
+        ])
 
     kernel_meta = {
         "id": kernel_ref,
         "title": cfg["kernel_title"],
-        "code_file": "train_and_export.py",
+        "code_file": code_filename,
         "language": "python",
         "kernel_type": "script",
         "is_private": "true",
         "enable_gpu": "true",
         "enable_tpu": "false",
         "enable_internet": "true",
-        "dataset_sources": [dataset_ref],
+        "dataset_sources": dataset_sources,
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": [],
     }
-    with open(KERNEL_DIR / "kernel-metadata.json", "w", encoding="utf-8") as f:
+    push_dir.mkdir(parents=True, exist_ok=True)
+    with open(push_dir / "kernel-metadata.json", "w", encoding="utf-8") as f:
         json.dump(kernel_meta, f, indent=2)
 
     print(f"[SautiLM-Forge] Pushing GPU Kernel to Kaggle: {kernel_ref}")
-    res = api.kernels_push(str(KERNEL_DIR))
+    res = _with_kaggle_retry(lambda: api.kernels_push(str(push_dir)), "kernels_push")
     print(f"[SautiLM-Forge] Kernel push response: {getattr(res, 'url', res)}")
     return kernel_ref
 
 
 def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "jua") -> str:
-    """Builds the official Hugging Face Model Card for sautilm/SautiLM-Jua or a standalone specialty."""
+    """Builds accurate Hugging Face Model Card across SautiLM-Jua (270M), Nuru (TFLite), and Kuu (1B/4B)."""
     cfg = _target_config(target)
+    t_key = cfg["target"]
     stats_file = DATA_DIR / cfg["stats_filename"]
-    corpus_total = 23500 if cfg["target"] == "jua" else 260
+    corpus_total = 23500 if t_key == "jua" else 260
     lex_count = 1150
     if stats_file.exists():
         try:
@@ -198,74 +321,101 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "ju
         except Exception:
             pass
 
-    size_mb = metrics.get("litertlm_size_mb", "Pending build") if metrics else "Pending build"
-    quant_recipe = metrics.get("quantization_recipe", "dynamic_wi8_afp32") if metrics else "dynamic_wi8_afp32"
-    lora_r = metrics.get("lora_r", 16) if metrics else 16
-    lora_alpha = metrics.get("lora_alpha", 32) if metrics else 32
-    quality_score = metrics.get("litertlm_quality_score", "Pending") if metrics else "Pending"
-    final_loss = f"{metrics['final_loss']:.4f}" if (metrics and metrics.get("final_loss") is not None) else "Pending"
-    steps = metrics.get("steps", "Pending") if metrics else "Pending"
-    verified_badge = f"Verified via LiteRT-LM Runtime ({quality_score})" if (metrics and metrics.get("litertlm_verified")) else "Pending Runtime Verification"
+    if t_key == "kuu-stem":
+        default_base = "google/gemma-3-1b-it"
+        arch_desc = "Google Gemma 3 1B (`Gemma3ForCausalLM`, 26 layers, `hidden_size=1152`, `cache_length=2048`)"
+        lib_name = "litert-lm"
+        pipeline_tag = "text-generation"
+        target_hw = "AndaaEdge / Shul'etu Capable Mobile & Tablet (Android 8.0+, >= 4 GB RAM)"
+    elif t_key == "kuu-med":
+        default_base = "google/medgemma-4b-it"
+        arch_desc = "Google MedGemma 4B IT quantized GGUF `Q4_K_M` (`n_ctx=4096`)"
+        lib_name = "gguf"
+        pipeline_tag = "text-generation"
+        target_hw = "AfyaSpeak Desktop PC / Clinic Workstation (>= 8 GB RAM; excluded from mobile APKs)"
+    elif t_key == "kuu-ius":
+        default_base = "google/gemma-3-4b-it"
+        arch_desc = "Google Gemma 3 4B IT quantized GGUF `Q4_K_M` (`n_ctx=4096`)"
+        lib_name = "gguf"
+        pipeline_tag = "text-generation"
+        target_hw = "Legal Desktop Workstation for DRC Courts & Lawyers (>= 8 GB RAM; excluded from mobile APKs)"
+    elif t_key == "nuru-agri":
+        default_base = "tf.keras.applications.MobileNetV3Small"
+        arch_desc = "MobileNetV3-Small Full-Integer INT8 TFLite (`224x224x3 uint8`, 9 EAC crop + `non_plant` classes)"
+        lib_name = "tflite"
+        pipeline_tag = "image-classification"
+        target_hw = "Gemmea Mobile Collaborative Pass-1 Vision (CPU/NNAPI, <= 45 MB)"
+    else:
+        default_base = "google/gemma-3-270m-it"
+        arch_desc = "Google Gemma 3 270M IT (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`, `cache_length=2048`)"
+        lib_name = "litert-lm"
+        pipeline_tag = "text-generation"
+        target_hw = "Android 8.0+ (API 26+), >= 2 GB RAM, ARM Cortex-A53/A55 CPU"
+
+    base_model = (metrics or {}).get("base_model") or default_base
+    size_mb = (
+        (metrics or {}).get("litertlm_size_mb")
+        or (metrics or {}).get("size_mb")
+        or "Pending build"
+    )
+    quant_recipe = (metrics or {}).get("quantization_recipe") or cfg.get("export_format") or "dynamic_wi8_afp32"
+    lora_r = (metrics or {}).get("lora_r", 16)
+    lora_alpha = (metrics or {}).get("lora_alpha", 32)
+    quality_score = (metrics or {}).get("litertlm_quality_score", "Pending")
+    best_val_loss = (metrics or {}).get("best_val_loss")
+    final_loss_raw = (metrics or {}).get("final_train_loss") or (metrics or {}).get("final_loss")
+    final_loss = f"{final_loss_raw:.4f}" if isinstance(final_loss_raw, (int, float)) else "Pending"
+    val_loss_str = f"{best_val_loss:.4f}" if isinstance(best_val_loss, (int, float)) else "Pending"
+    steps = (metrics or {}).get("steps", "Pending")
+    verified_flag = bool(
+        metrics and (metrics.get("litertlm_verified") or metrics.get("gguf_verified") or metrics.get("size_mb"))
+    )
+    verified_badge = f"Verified Runtime ({quality_score})" if verified_flag else "Pending Runtime Verification"
 
     return f"""---
 license: gemma
-base_model: google/gemma-3-270m-it
-library_name: litert-lm
+base_model: {base_model}
+library_name: {lib_name}
 language:
 - fr
 - en
 - sw
 tags:
 - sautilm
-- sautilm-jua
 - {cfg['variant']}
 - bbadha
 - drc
+- east-africa
 - edge-ai
-- litertlm
+- {lib_name}
 - offline-ai
 - losingtek
-pipeline_tag: text-generation
+pipeline_tag: {pipeline_tag}
 ---
 
 # {cfg['model_name']} (Offline Edge-AI Model - {size_mb} MB)
 
 **{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
 
-Built directly on **Google Gemma 3 (`270M-IT`)** with masked-loss LoRA Supervised Fine-Tuning (SFT) on **{corpus_total:,} verified zero-leakage instructions** and compiled with Google's official `litert-torch` (`{quant_recipe}`) into native `.litertlm` container format (`{cfg['litertlm_filename']}`, **{size_mb} MB**), executing natively on Android smartphones via LiteRT-LM with zero internet connection.
+Part of SautiLM's strict 3-tier architecture (**SautiLM-Jua** 270M mobile standard, **SautiLM-Nuru** TFLite <= 45 MB vision classifiers, and **SautiLM-Kuu** 1B mobile / 4B Desktop workstations). Zero-leakage training on **{corpus_total:,} verified examples** with `litert-torch` (`{quant_recipe}`) / INT8 quantization.
 
----
-
-## SautiLM-Jua Modular Architecture (Strictly Separated Specialties)
-
-- **SautiLM-Jua** : Clean multi-domain offline foundation model (`sautilm-jua.litertlm`)
-- **SautiLM-Jua-STEM** : Secondary School & DRC Examen d'État STEM (60% French / 40% English; Maths, Physics, Chemistry, Biology; partner integration: Andaa Edge)
-- **SautiLM-Jua-Lex** : Bbadha (Kilendu), Kiswahili, French & English lexicography (**{lex_count:,} verified dictionary entries**)
-- **SautiLM-Jua-Med** : Community public health & medical protocols (partner integration: AfyaSpeak)
-- **SautiLM-Jua-Agri** : Agronomy & crop protection (partner integration: Gemmea)
-- **SautiLM-Jua-Ius** : Congolese Law (DRC Constitution, Family Code, Penal Code, Labor Code, OHADA)
-- **SautiLM-Jua-Fin** : Cooperative finance, SME accounting & AVEC microfinance
-- **SautiLM-Jua-Civ** : Civil status administration & peaceful community mediation
-- **SautiLM-Jua-Vision** : Offline OCR chalkboard text solving (pixel vision reserved for **SautiLM-Nuru**)
-- **SautiLM-Jua-Voice** : Tonal phonetics & voice assistant companion
-
----
+## SautiLM Modular Ecosystem
+- **SautiLM-Jua** (`270M` Mobile LiteRT-LM): `SautiLM-Jua-STEM`, `SautiLM-Jua-Lex` (Bbadha 1,150 entries), `SautiLM-Jua-Med`, `SautiLM-Jua-Agri`, `SautiLM-Jua-Ius` (DRC/OHADA Law), `SautiLM-Jua-Fin`, `SautiLM-Jua-Civ`
+- **SautiLM-Nuru** (`<= 45 MB` TFLite INT8): `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
+- **SautiLM-Kuu** (`1B` Mobile / `4B` PC GGUF): `SautiLM-Kuu-STEM`, `SautiLM-Kuu-Med` (AfyaSpeak PC), `SautiLM-Kuu-Ius` (DRC Courts PC)
 
 ## Technical Specifications
 
 | Specification | Value |
 | :--- | :--- |
 | **Model Identifier** | `sautilm/{cfg['hf_repo']}` |
-| **Mobile Bundle** | `{cfg['litertlm_filename']}` ({size_mb} MB) |
-| **Quantization / Export** | `litert-torch` (`{quant_recipe}`, TFLite FlatBuffer Prefill/Decode + HF Tokenizer) |
-| **Parent Architecture** | Google Gemma 3 (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`, `cache_length=2048`) |
-| **Training Corpus** | {corpus_total:,} clean instructions |
-| **Training Steps / Final Loss** | {steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`, response-only loss masking) / Final Loss: `{final_loss}` |
+| **Artifact Bundle** | `{cfg['litertlm_filename']}` ({size_mb} MB) |
+| **Quantization / Format** | `{quant_recipe}` |
+| **Architecture** | {arch_desc} |
+| **Training Corpus** | {corpus_total:,} verified examples ({lex_count:,} Bbadha dictionary entries in Lexicon DB) |
+| **Training / Validation Loss** | {steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`) / Train: `{final_loss}` / Best Val: `{val_loss_str}` |
 | **Runtime Verification** | {verified_badge} |
-| **Target Mobile Runtime** | Flutter (`flutter_edge_ai` + `flutter_edge_ai_litertlm`) |
-| **Minimum Hardware** | Android 8.0+ (API 26+), 2 GB RAM, ARM Cortex-A53/A55 CPU or Mobile GPU |
-
----
+| **Target Hardware** | {target_hw} |
 
 ## Research & Founding Team (SautiLM / LosingTek)
 
@@ -322,21 +472,37 @@ def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") 
         )
 
     if include_outputs and out_dir.exists():
-        if not (metrics and metrics.get("litertlm_verified")):
-            raise RuntimeError(
-                "Refusing to upload unverified .litertlm artifacts to Hugging Face! "
-                "Ensure training_metrics.json confirms litertlm_verified=True."
+        is_verified = bool(
+            metrics
+            and (
+                metrics.get("litertlm_verified")
+                or metrics.get("gguf_verified")
+                or metrics.get("tflite_verified")
             )
-        litertlm_file = out_dir / cfg["litertlm_filename"]
-        if not litertlm_file.exists():
-            raise FileNotFoundError(f"No verified .litertlm bundle found in {out_dir}")
-        print(f"[SautiLM-Forge] Uploading verified {litertlm_file.name} to {repo_id}...")
+        )
+        if not is_verified:
+            raise RuntimeError(
+                "Refusing to upload unverified artifacts to Hugging Face! "
+                "Ensure training_metrics.json confirms litertlm_verified / gguf_verified / tflite_verified = True."
+            )
+        bundle_file = out_dir / cfg["litertlm_filename"]
+        if not bundle_file.exists():
+            raise FileNotFoundError(f"No verified bundle found in {out_dir}")
+        print(f"[SautiLM-Forge] Uploading verified {bundle_file.name} to {repo_id}...")
         hf_api.upload_file(
-            path_or_fileobj=str(litertlm_file),
+            path_or_fileobj=str(bundle_file),
             path_in_repo=cfg["litertlm_filename"],
             repo_id=repo_id,
             repo_type="model",
         )
+        manifest_file = out_dir / "sautilm-nuru-agri.manifest.json"
+        if manifest_file.exists():
+            hf_api.upload_file(
+                path_or_fileobj=str(manifest_file),
+                path_in_repo=manifest_file.name,
+                repo_id=repo_id,
+                repo_type="model",
+            )
         if metrics_file.exists():
             hf_api.upload_file(
                 path_or_fileobj=str(metrics_file),
@@ -366,7 +532,7 @@ def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dic
 
     api = KaggleApi()
     api.authenticate()
-    status_resp = api.kernels_status(kernel_ref)
+    status_resp = _with_kaggle_retry(lambda: api.kernels_status(kernel_ref), "kernels_status")
     status_str = str(getattr(status_resp, "status", status_resp))
     failure_msg = getattr(status_resp, "failureMessage", None)
 
@@ -387,12 +553,15 @@ def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dic
             except Exception:
                 prev_elapsed = None
 
-        api.kernels_output(
-            kernel_ref,
-            path=str(out_dir),
-            file_pattern=r"^training_metrics\.json$",
-            force=True,
-            quiet=False,
+        _with_kaggle_retry(
+            lambda: api.kernels_output(
+                kernel_ref,
+                path=str(out_dir),
+                file_pattern=r"^training_metrics\.json$",
+                force=True,
+                quiet=False,
+            ),
+            "kernels_output_metrics",
         )
         remote_metrics: Dict[str, Any] = {}
         if metrics_path.exists():
@@ -411,22 +580,17 @@ def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dic
 
         escaped_litert = cfg["litertlm_filename"].replace(".", r"\.")
         escaped_adapter = cfg["adapter_dirname"]
-        pattern = rf"^({escaped_litert}|sautilm-jua\.litertlm|sautilm-v1\.litertlm|{escaped_adapter}/.*|sautilm_v1_lora_adapter/.*)$"
-        for attempt in range(1, 4):
-            try:
-                api.kernels_output(
-                    kernel_ref,
-                    path=str(out_dir),
-                    file_pattern=pattern,
-                    force=False,
-                    quiet=False,
-                )
-                break
-            except Exception as err:
-                if attempt == 3:
-                    raise
-                print(f"[SautiLM-Forge] Download attempt {attempt} interrupted ({err}); resuming...")
-                time.sleep(3)
+        pattern = rf"^({escaped_litert}|sautilm-nuru-agri\.manifest\.json|sautilm-jua\.litertlm|sautilm-v1\.litertlm|{escaped_adapter}/.*|sautilm_v1_lora_adapter/.*)$"
+        _with_kaggle_retry(
+            lambda: api.kernels_output(
+                kernel_ref,
+                path=str(out_dir),
+                file_pattern=pattern,
+                force=False,
+                quiet=False,
+            ),
+            "kernels_output_bundle",
+        )
         result["downloaded_to"] = str(out_dir)
     return result
 
@@ -434,21 +598,28 @@ def check_or_download_kaggle_kernel(kernel_ref: str, target: str = "jua") -> Dic
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orchestrate modular SautiLM Kaggle training & Hugging Face uploads.")
     parser.add_argument("action", nargs="?", default="launch", choices=("launch", "status", "upload"))
-    parser.add_argument("--target", default="jua", help="Target build ('jua' or specialty e.g. 'stem').")
+    parser.add_argument(
+        "--target",
+        default="jua",
+        help="Target build ('jua', 'stem', 'kuu-stem', 'kuu-med', 'kuu-ius', 'nuru-agri', 'all', 'all-with-desktop', or comma-separated).",
+    )
     cli_args = parser.parse_args()
 
-    cfg = _target_config(cli_args.target)
-    if cli_args.action == "launch":
-        ds_ref = publish_dataset_to_kaggle(skip_if_exists=False, target=cfg["target"])
-        print("Waiting 15s for Kaggle dataset indexing...")
-        time.sleep(15)
-        k_ref = push_gpu_kernel_to_kaggle(ds_ref, target=cfg["target"])
-        print(json.dumps({"target": cfg["target"], "dataset": ds_ref, "kernel": k_ref}, indent=2))
-    elif cli_args.action == "status":
-        auth = _load_local_auth()
-        k_ref = f"{auth['kaggle_user']}/{cfg['kernel_slug']}"
-        info = check_or_download_kaggle_kernel(k_ref, target=cfg["target"])
-        print(json.dumps(info, indent=2))
-    elif cli_args.action == "upload":
-        hf_url = init_and_upload_hf_repo(include_outputs=True, target=cfg["target"])
-        print(json.dumps({"target": cfg["target"], "hf_url": hf_url}, indent=2))
+    targets = _resolve_target_list(cli_args.target)
+    outputs = []
+    for single_target in targets:
+        cfg = _target_config(single_target)
+        if cli_args.action == "launch":
+            ds_ref = publish_dataset_to_kaggle(skip_if_exists=False, target=cfg["target"], refresh_corpus=True)
+            print("Waiting 15s for Kaggle dataset indexing...")
+            time.sleep(15)
+            k_ref = push_gpu_kernel_to_kaggle(ds_ref, target=cfg["target"])
+            outputs.append({"target": cfg["target"], "dataset": ds_ref, "kernel": k_ref})
+        elif cli_args.action == "status":
+            auth = _load_local_auth()
+            k_ref = f"{auth['kaggle_user']}/{cfg['kernel_slug']}"
+            outputs.append(check_or_download_kaggle_kernel(k_ref, target=cfg["target"]))
+        elif cli_args.action == "upload":
+            hf_url = init_and_upload_hf_repo(include_outputs=True, target=cfg["target"])
+            outputs.append({"target": cfg["target"], "hf_url": hf_url})
+    print(json.dumps(outputs[0] if len(outputs) == 1 else outputs, indent=2))

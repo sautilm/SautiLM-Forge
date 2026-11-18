@@ -12,13 +12,10 @@ It powers the **SautiLM** family of offline mobile language models engineered fo
 
 ## 1. SautiLM Foundation Series & 10 Specialized Domain Models
 
-### Foundation Model Series (3-4 Letter Swahili / Kingwana Names)
-- **`SautiLM Jua`** (*Sun / Knowledge*) : Compact Edge-AI foundation model (`272.36 MB` INT8 LiteRT-LM, Active on Hugging Face)
-- **`SautiLM Nuru`** (*Light / Clarity*) : Mid-sized multimodal & reasoning model (In development)
-- **`SautiLM Wazo`** (*Thought / Deep Reasoning*) : Analytical model for law, STEM, and research (In development)
-- **`SautiLM Moto`** (*Fire / High Speed*) : Ultra-low-latency streaming and voice model (In development)
-- **`SautiLM Kuu`** (*Supreme / Flagship*) : Full-scale institutional model for universities, courts, and hospitals (In development)
-- **`SautiLM Mali`** (*Heritage / Treasure*) : Sovereign linguistic and cultural corpus foundation (In development)
+### Three Official Product Series (Strict Naming)
+- **`SautiLM-Jua`** (`270M` INT8 LiteRT-LM, `~283.48 MB`, `dynamic_wi8_afp32`, multi-prefill `[128, 512, 1024]`) : Standard mobile foundation & domain models (`SautiLM-Jua`, `SautiLM-Jua-STEM`, `SautiLM-Jua-Lex`, `SautiLM-Jua-Med`, `SautiLM-Jua-Agri`, `SautiLM-Jua-Ius`, `SautiLM-Jua-Fin`, `SautiLM-Jua-Civ`).
+- **`SautiLM-Nuru`** (`TFLite INT8`, `<= 45 MB` — e.g. `SautiLM-Nuru-Agri` at `1.074 MB`, 9 classes with `non_plant` rejection gate at `< 0.55`) : Fast collaborative mobile vision classifiers passing structured triage to SQLite FTS5 RAG + `Jua`/`Kuu`.
+- **`SautiLM-Kuu`** (`1B` mobile/tablet LiteRT-LM `SautiLM-Kuu-STEM` for `AndaaEdge.com` / `Shul'etu` PDF quiz & EXETAT solving; `4B` Desktop PC `GGUF Q4_K_M` `SautiLM-Kuu-Med` & `SautiLM-Kuu-Ius` for `AfyaSpeak` & DRC courts, strictly excluded from mobile APKs).
 
 ### 10 Specialized Domain Modules
 | Model | Target Domain | Core Capabilities |
@@ -41,20 +38,17 @@ It powers the **SautiLM** family of offline mobile language models engineered fo
 ```text
 SautiLM-Forge/
 ├── src/
-│   ├── corpus_builder.py        # Extracts verified linguistic JSONs & generates 22,857 SFT instructions
-│   ├── litertlm_packager.py     # Validates .litertlm FlatBuffer mobile containers
-│   └── kaggle_orchestrator.py   # Hybrid orchestrator: Local PC -> Remote Kaggle T4 GPU -> Hugging Face Hub
+│   ├── corpus_builder.py            # Curates 1,150 Bbadha entries & zero-duplication SFT corpora
+│   ├── specialty_sft_generators.py  # Parametric Med (271), Agri (253) & Ius (265) unique pairs
+│   ├── stem_sft_generators.py       # Parametric secondary STEM & AndaaEdge PDF->QCM (639 unique pairs)
+│   ├── nuru_vision_trainer.py       # SautiLM-Nuru-Agri 9-class TFLite INT8 collaborative vision trainer
+│   ├── litertlm_packager.py         # Validates .litertlm FlatBuffer mobile containers
+│   └── kaggle_orchestrator.py       # Multi-target orchestrator (Jua 270M, Kuu 1B/4B, Nuru TFLite) -> HF Hub
 ├── kaggle_kernel/
-│   └── train_and_export.py      # Remote GPU LoRA fine-tuning (r=32, alpha=64) & litert-torch INT8 export
-├── data/
-│   ├── corpus_stats.json        # Verified statistics of the 22,857-instruction corpus
-│   └── sample_train_schema.jsonl# Public schema sample (5 example instructions across domains)
-├── kaggle_output/
-│   └── training_metrics.json    # Empirical Tesla T4 GPU metrics (525 steps, Loss: 4.16 -> 0.35, 8/8 checks)
-├── docs/
-│   ├── specs/                   # Architectural specifications
-│   └── plans/                   # Implementation plans
-└── tests/                       # Unit test suite for corpus generation and .litertlm binary validation
+│   └── train_and_export.py          # Zero-leakage stratified split, Early Stopping on val_loss & LiteRT-LM/GGUF export
+├── kaggle_nuru_kernel/
+│   └── train_nuru_vision_kaggle.py  # Remote GPU MobileNetV3-Small INT8 TFLite vision trainer (1.074 MB)
+└── tests/                           # 17 unit tests verifying zero train/val/eval leakage & container integrity
 ```
 
 > **Data Sovereignty & IP Protection Note**: To protect community linguistic assets and prevent unauthorized scraping, the full 1,150-word Bbadha JSON dictionary and the 35 MB `sautilm_v1_train.jsonl` corpus are excluded from public Git tracking via `.gitignore`. Only `data/sample_train_schema.jsonl` and `data/corpus_stats.json` are versioned publicly.

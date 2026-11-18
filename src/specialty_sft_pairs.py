@@ -2,6 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+try:
+    from .specialty_sft_generators import (
+        generate_agri_extended_pairs,
+        generate_ius_extended_pairs,
+        generate_med_extended_pairs,
+    )
+except ImportError:
+    from specialty_sft_generators import (
+        generate_agri_extended_pairs,
+        generate_ius_extended_pairs,
+        generate_med_extended_pairs,
+    )
+
 
 def _make_turn(
     domain: str,
@@ -36,10 +49,16 @@ def _make_turn(
 
 
 def _emit_pairs(domain: str, sys_prompt: str, items: List[tuple[str, str]]) -> List[Dict[str, Any]]:
+    """Emits unique (prompt, response) SFT pairs without duplicate repetition."""
     out: List[Dict[str, Any]] = []
+    seen_prompts = set()
     for q, a in items:
-        out.append(_make_turn(domain, sys_prompt, q, a))
-        out.append(_make_turn(domain, None, q, a))
+        norm_q = " ".join(q.lower().split())
+        if norm_q in seen_prompts:
+            continue
+        seen_prompts.add(norm_q)
+        role_msg = sys_prompt if len(out) % 2 == 0 else None
+        out.append(_make_turn(domain, role_msg, q, a))
     return out
 
 
@@ -90,7 +109,7 @@ def generate_med_specialty_pairs() -> List[Dict[str, Any]]:
         ("What is the purpose of clean umbilical cord care using chlorhexidine or dry clean technique in newborns?", "Applying prescribed antiseptic (e.g. 7.1% chlorhexidine gel where adopted) or keeping the cord **clean and dry** without cow dung, ashes, or herbs prevents lethal neonatal tetanus and sepsis."),
         ("Comment prévenir l'hypertension artérielle et les complications du diabète avec des habitudes simples ?", "### Prévention Maladies Chroniques (SautiLM-Jua-Med)\n\n1. Réduire l'excès de sel, d'huile raffinée et de sucres rapides ; privilégier légumes verts, légumineuses et activité physique régulière (30 min/jour).\n2. Suivre la tension artérielle, la glycémie et le traitement médical sans arrêt brutal."),
     ]
-    return _emit_pairs("med", sys_med, items)
+    return _emit_pairs("med", sys_med, items + generate_med_extended_pairs())
 
 
 def generate_agri_specialty_pairs() -> List[Dict[str, Any]]:
@@ -131,7 +150,7 @@ def generate_agri_specialty_pairs() -> List[Dict[str, Any]]:
         ("Comment multiplier rapidement les boutures saines de patate douce ou igname ?", "Utiliser des lianes apicales jeunes de 30 cm issues de pépinières saines ombragées, planter sur billons bien drainés après apport de compost, et pratiquer un paillage contre les charançons de la patate douce."),
         ("Qu'est-ce que l'agriculture de conservation et quels en sont les 3 piliers ?", "### Agriculture de Conservation (SautiLM-Jua-Agri)\n\n1. **Perturbation minimale du sol** (semis direct ou poquets/zaï sans labour profond destructeur).\n2. **Couverture organique permanente** (paillage, résidus de récolte ou plantes de couverture).\n3. **Diversification et rotation** (association céréales + légumineuses)."),
     ]
-    return _emit_pairs("agri", sys_agri, items)
+    return _emit_pairs("agri", sys_agri, items + generate_agri_extended_pairs())
 
 
 def generate_ius_specialty_pairs() -> List[Dict[str, Any]]:
@@ -180,4 +199,4 @@ def generate_ius_specialty_pairs() -> List[Dict[str, Any]]:
         ("Que prévoit la loi congolaise contre la corruption et le détournement de deniers publics ?", "### Répression de la Corruption en RDC (SautiLM-Jua-Ius)\n\nLe **Code Pénal congolais** réprime sévèrement la **corruption active et passive**, la **concussion** (perception de taxes illégales par un agent public) et le **détournement de deniers publics** par des peines de servitude pénale, d'amendes, de confiscation des biens mal acquis et d'interdiction d'exercer des fonctions publiques."),
         ("How is the Republic organized into provinces and decentralized territorial entities (ETDs) in DRC?", "### Territorial Organization of DR Congo (SautiLM-Jua-Ius)\n\nUnder the **DRC Constitution (Art. 2-3)**, the country comprises **Kinshasa** (capital city with provincial status) and **25 provinces**, endowed with legal personality and autonomous administration through decentralized territorial entities (**ETDs**: cities, *communes*, *secteurs*, and *chefferies*)."),
     ]
-    return _emit_pairs("ius", sys_ius, items)
+    return _emit_pairs("ius", sys_ius, items + generate_ius_extended_pairs())

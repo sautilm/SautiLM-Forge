@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+try:
+    from .stem_sft_generators import generate_extended_stem_pairs
+except ImportError:
+    from stem_sft_generators import generate_extended_stem_pairs
+
 
 STEM_SYSTEM_FR = (
     "Tu es SautiLM-Jua-STEM, assistant hors-ligne de mathématiques, physique, chimie et biologie "
@@ -756,9 +761,15 @@ def generate_stem_instructions() -> List[Dict[str, Any]]:
         ("en", STEM_SYSTEM_EN, "Introduce yourself briefly.",
          "### SautiLM-Jua-STEM Assistant\n\nI am **SautiLM-Jua-STEM** (**LosingTek Research**), an offline secondary Mathematics and Science tutor."),
     ]
-    for lang, sys_p, q, a in stem_greetings_identity:
-        for _ in range(2):
-            out.append(_stem_turn(lang, sys_p, q, a))
-            out.append(_stem_turn(lang, None, q, a))
+    for idx, (lang, sys_p, q, a) in enumerate(stem_greetings_identity):
+        out.append(_stem_turn(lang, sys_p if idx % 2 == 0 else None, q, a))
+
+    seen_prompts = {" ".join(str(r.get("prompt") or "").lower().split()) for r in out}
+    for lang, sys_p, q, a in generate_extended_stem_pairs():
+        norm_q = " ".join(q.lower().split())
+        if norm_q in seen_prompts:
+            continue
+        seen_prompts.add(norm_q)
+        out.append(_stem_turn(lang, sys_p, q, a))
 
     return out

@@ -125,6 +125,73 @@ class TestCorpusBuilder(unittest.TestCase):
                 self.assertGreater(stats["total_instructions"], 0)
                 self.assertTrue((out_dir / f"sautilm_jua_{domain}_train.jsonl").exists())
 
+    def test_clean_bbadha_gloss_field_and_invalid_headword_filter(self) -> None:
+        from src.corpus_builder import (
+            clean_bbadha_gloss_field,
+            compile_mobile_lexicon,
+            generate_lex_instructions,
+            is_valid_bbadha_headword,
+        )
+
+        self.assertEqual(
+            clean_bbadha_gloss_field("grossir {ou} ;  grossir {ou} ;   vaille que vaille ~ "),
+            "grossir ou ; vaille que vaille",
+        )
+        self.assertFalse(is_valid_bbadha_headword("="))
+        self.assertFalse(is_valid_bbadha_headword("affaire)"))
+        self.assertFalse(is_valid_bbadha_headword("potable?"))
+        self.assertTrue(is_valid_bbadha_headword("ddà"))
+        self.assertTrue(is_valid_bbadha_headword("fékéféké (ou: féfé)"))
+
+        mock_entries = [
+            {
+                "word_bbadha": "=",
+                "meanings": [{"swahili_translation": "bad", "french_translation": "faux"}],
+            },
+            {
+                "word_bbadha": "ddà",
+                "english_translation": "water ; to be long",
+                "meanings": [{"swahili_translation": "maji ; kuwa refu", "french_translation": "eau ; être long"}],
+            },
+        ]
+        compiled = compile_mobile_lexicon(mock_entries)
+        self.assertEqual(compiled[1]["english"], "water ; to be long")
+        self.assertNotEqual(compiled[1]["english"], compiled[1]["french"])
+
+        lex_inst = generate_lex_instructions(mock_entries)
+        joined = "\n".join(str(r) for r in lex_inst)
+        self.assertIn("ddà", joined)
+        self.assertNotIn("Le mot Bbadha `=`", joined)
+
+    def test_curation_overrides_repair_headwords_and_authentic_english(self) -> None:
+        from src.corpus_builder import (
+            BBADHA_CURATION_OVERRIDES_PATH,
+            compile_mobile_lexicon,
+            load_bbadha_raw_entries,
+        )
+
+        if not BBADHA_JSON_DIR.exists() or not BBADHA_CURATION_OVERRIDES_PATH.exists():
+            self.skipTest("Private Bbadha dataset or curation overrides not mounted locally.")
+
+        raw = load_bbadha_raw_entries(BBADHA_JSON_DIR)
+        mobile = compile_mobile_lexicon(raw)
+        self.assertGreaterEqual(len(mobile), 1150)
+
+        bad_heads = {"=", ".", ",", "&", "boire", "affaire)", "chose", "limpide"}
+        found_bad = [e["bbadha"] for e in mobile if e["bbadha"] in bad_heads]
+        self.assertEqual(found_bad, [], f"Corrupted headwords leaked: {found_bad}")
+
+        identical_en_fr = [
+            (e["bbadha"], e["french"], e["english"])
+            for e in mobile
+            if e["english"].strip().lower() == e["french"].strip().lower()
+        ]
+        self.assertLessEqual(
+            len(identical_en_fr),
+            10,
+            f"Too many entries still copy French to English: {identical_en_fr[:10]}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

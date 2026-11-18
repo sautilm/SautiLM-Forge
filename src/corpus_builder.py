@@ -1,8 +1,9 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
     from .domain_sft_pairs import (
@@ -34,6 +35,9 @@ BBADHA_JSON_DIR = (
     else WORKSPACE_ROOT / "sautilm-internal-docs" / "datasets" / "bbadha-curated-app-jsons"
 )
 FLUTTER_SAUTILM_ASSETS_DATA_DIR = WORKSPACE_ROOT / "Flutter" / "sautilm" / "assets" / "data"
+BBADHA_CURATION_OVERRIDES_PATH = (
+    WORKSPACE_ROOT / "sautilm-internal-docs" / "datasets" / "bbadha_curation_overrides.json"
+)
 
 SYSTEM_PROMPT_SAUTILM = (
     "You are SautiLM-Jua, an offline Edge-AI foundation model created in Bunia, Ituri, DRC by "
@@ -111,7 +115,7 @@ def load_bbadha_raw_entries(json_dir: Path = BBADHA_JSON_DIR) -> List[Dict[str, 
                     if isinstance(item, dict) and item.get("word_bbadha"):
                         item["_source_letter"] = json_file.stem.upper()
                         entries.append(item)
-    return entries
+    return normalize_bbadha_raw_entries(entries)
 
 
 def infer_category_key(sw_text: str, fr_text: str) -> Dict[str, str]:
@@ -228,11 +232,162 @@ def infer_category_key(sw_text: str, fr_text: str) -> Dict[str, str]:
     }
 
 
+_OCR_ARTIFACT_RE = re.compile(r"[~{}\[\]<>]|(?:\(\s*\))")
+_MULTI_SPACE_RE = re.compile(r"\s+")
+
+
+def load_bbadha_curation_overrides(
+    overrides_path: Path = BBADHA_CURATION_OVERRIDES_PATH,
+) -> Dict[str, Dict[str, Any]]:
+    """Loads private PDF-verified headword repairs and English glosses if available locally."""
+    if not overrides_path.exists():
+        return {}
+    try:
+        payload = json.loads(overrides_path.read_text(encoding="utf-8"))
+        by_idx = payload.get("by_source_index")
+        return by_idx if isinstance(by_idx, dict) else {}
+    except Exception:
+        return {}
+
+
+def clean_bbadha_gloss_field(text: str) -> str:
+    """Removes residual OCR noise, collapses whitespace, and deduplicates gloss clauses."""
+    if not text:
+        return ""
+    cleaned = _OCR_ARTIFACT_RE.sub(" ", str(text))
+    cleaned = _MULTI_SPACE_RE.sub(" ", cleaned).strip()
+    parts: List[str] = []
+    seen = set()
+    for seg in cleaned.split(";"):
+        s = seg.strip(" \t\r\n;,/:")
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            parts.append(s)
+    return " ; ".join(parts)
+
+
+def is_valid_bbadha_headword(headword: str) -> bool:
+    """Rejects un-curated punctuation tokens or leaked sentence fragments as lexical headwords."""
+    hw = clean_bbadha_gloss_field(headword)
+    if not hw or len(hw) > 48:
+        return False
+    if hw in {"=", ".", ",", "&", "-", "/", ":", ";", "?"}:
+        return False
+    if re.search(r"[?!.,:;]{2,}|^[=.,&/\\-]", hw):
+        return False
+    if "?" in hw or "!" in hw:
+        return False
+    if hw.endswith(")") and "(" not in hw:
+        return False
+    return True
+
+
+def _extract_cleaned_examples(meanings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Extracts and sanitizes authentic example sentences across raw meaning senses."""
+    examples: List[Dict[str, Any]] = []
+    seen_bb = set()
+    for m in meanings:
+        if not isinstance(m, dict):
+            continue
+        for ex in m.get("examples") or []:
+            if not isinstance(ex, dict):
+                continue
+            bb_s = clean_bbadha_gloss_field(sanitize_sautilm_text(str(ex.get("bbadha_sentence") or "")))
+            sw_s = clean_bbadha_gloss_field(sanitize_sautilm_text(str(ex.get("swahili_sentence") or "")))
+            fr_s = clean_bbadha_gloss_field(sanitize_sautilm_text(str(ex.get("french_sentence") or "")))
+            if not bb_s or bb_s in seen_bb:
+                continue
+            seen_bb.add(bb_s)
+            examples.append(
+                {
+                    "bbadha_sentence": bb_s,
+                    "swahili_sentence": sw_s or None,
+                    "french_sentence": fr_s or None,
+                }
+            )
+    return examples
+
+
+def normalize_bbadha_raw_entries(
+    raw_entries: List[Dict[str, Any]],
+    overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Applies PDF-verified headword/gloss curation and generic OCR cleanup idempotently."""
+    ov_map = overrides if overrides is not None else load_bbadha_curation_overrides()
+    letter_counts: Dict[str, int] = {}
+    normalized: List[Dict[str, Any]] = []
+
+    for entry in raw_entries:
+        item = dict(entry)
+        letter = str(item.get("_source_letter") or "").upper()
+        local_idx = letter_counts.get(letter, 0) if letter else -1
+        if letter:
+            letter_counts[letter] = local_idx + 1
+
+        orig_bb = sanitize_sautilm_text(str(item.get("word_bbadha") or "")).strip()
+        ov_key = f"{letter}:{local_idx}" if letter and local_idx >= 0 else ""
+        ov = ov_map.get(ov_key) if ov_key else None
+        # Only apply positional override if it matches this exact source entry (safe for mocks/idempotency).
+        if ov and orig_bb not in (ov.get("orig_word_bbadha", ""), ov.get("word_bbadha", "")):
+            ov = None
+
+        raw_meanings = item.get("meanings") or []
+        if ov:
+            item["word_bbadha"] = ov["word_bbadha"]
+            if ov.get("phonetics"):
+                item["phonetics"] = clean_bbadha_gloss_field(sanitize_sautilm_text(ov["phonetics"]))
+            if ov.get("grammar"):
+                item["grammar"] = clean_bbadha_gloss_field(sanitize_sautilm_text(ov["grammar"]))
+            item["english_translation"] = clean_bbadha_gloss_field(sanitize_sautilm_text(ov["english"]))
+            cleaned_examples = _extract_cleaned_examples(raw_meanings)
+            item["meanings"] = [
+                {
+                    "sense_id": 1,
+                    "swahili_translation": clean_bbadha_gloss_field(sanitize_sautilm_text(ov["swahili"])),
+                    "french_translation": clean_bbadha_gloss_field(sanitize_sautilm_text(ov["french"])),
+                    "english_translation": item["english_translation"],
+                    "examples": cleaned_examples,
+                }
+            ]
+        else:
+            item["word_bbadha"] = clean_bbadha_gloss_field(orig_bb)
+            if item.get("phonetics"):
+                item["phonetics"] = clean_bbadha_gloss_field(sanitize_sautilm_text(str(item["phonetics"])))
+            if item.get("grammar"):
+                item["grammar"] = clean_bbadha_gloss_field(sanitize_sautilm_text(str(item["grammar"])))
+            if item.get("english_translation"):
+                item["english_translation"] = clean_bbadha_gloss_field(
+                    sanitize_sautilm_text(str(item["english_translation"]))
+                )
+            new_meanings = []
+            for m in raw_meanings:
+                if not isinstance(m, dict):
+                    continue
+                m_copy = dict(m)
+                if m_copy.get("swahili_translation"):
+                    m_copy["swahili_translation"] = clean_bbadha_gloss_field(
+                        sanitize_sautilm_text(str(m_copy["swahili_translation"]))
+                    )
+                if m_copy.get("french_translation"):
+                    m_copy["french_translation"] = clean_bbadha_gloss_field(
+                        sanitize_sautilm_text(str(m_copy["french_translation"]))
+                    )
+                if m_copy.get("english_translation"):
+                    m_copy["english_translation"] = clean_bbadha_gloss_field(
+                        sanitize_sautilm_text(str(m_copy["english_translation"]))
+                    )
+                new_meanings.append(m_copy)
+            item["meanings"] = new_meanings
+
+        normalized.append(item)
+    return normalized
+
+
 def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Compiles the 1,150 Bbadha JSON entries into a fast, structured mobile lexicon."""
     compiled: List[Dict[str, Any]] = []
-    for idx, entry in enumerate(raw_entries):
-        word_bbadha = sanitize_sautilm_text(str(entry.get("word_bbadha", "")))
+    for idx, entry in enumerate(normalize_bbadha_raw_entries(raw_entries)):
+        word_bbadha = clean_bbadha_gloss_field(sanitize_sautilm_text(str(entry.get("word_bbadha", ""))))
         phonetics = sanitize_sautilm_text(str(entry.get("phonetics") or ""))
         grammar = sanitize_sautilm_text(str(entry.get("grammar") or ""))
         meanings = entry.get("meanings") or []
@@ -275,8 +430,15 @@ def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, 
             key=lambda x: 0 if (x["bbadha"] and x["swahili"] and x["french"]) else 1
         )
 
-        primary_sw = " ; ".join(sw_list[:3]) if sw_list else word_bbadha
-        primary_fr = " ; ".join(fr_list[:3]) if fr_list else word_bbadha
+        en_list = [
+            clean_bbadha_gloss_field(sanitize_sautilm_text(str(m.get("english_translation"))))
+            for m in meanings
+            if isinstance(m, dict) and m.get("english_translation")
+        ]
+        primary_sw = clean_bbadha_gloss_field(" ; ".join(sw_list[:3])) if sw_list else word_bbadha
+        primary_fr = clean_bbadha_gloss_field(" ; ".join(fr_list[:3])) if fr_list else word_bbadha
+        entry_en = clean_bbadha_gloss_field(sanitize_sautilm_text(str(entry.get("english_translation") or "")))
+        primary_en = entry_en or (clean_bbadha_gloss_field(" ; ".join(en_list[:3])) if en_list else primary_fr)
         cat = infer_category_key(primary_sw, primary_fr)
 
         meta_parts_fr: List[str] = []
@@ -315,7 +477,7 @@ def compile_mobile_lexicon(raw_entries: List[Dict[str, Any]]) -> List[Dict[str, 
                 "grammar": grammar,
                 "swahili": primary_sw,
                 "french": primary_fr,
-                "english": primary_fr,
+                "english": primary_en,
                 "categoryKey": cat["categoryKey"],
                 "categoryEn": cat["categoryEn"],
                 "categoryFr": cat["categoryFr"],
@@ -350,8 +512,8 @@ def generate_lex_instructions(raw_entries: List[Dict[str, Any]]) -> List[Dict[st
     }
 
     for idx, entry in enumerate(raw_entries):
-        word = sanitize_sautilm_text(str(entry.get("word_bbadha") or ""))
-        if not word:
+        word = clean_bbadha_gloss_field(sanitize_sautilm_text(str(entry.get("word_bbadha") or "")))
+        if not word or not is_valid_bbadha_headword(word):
             continue
         phonetics = sanitize_sautilm_text(str(entry.get("phonetics") or "Non spécifié"))
         grammar = sanitize_sautilm_text(str(entry.get("grammar") or "Terme lexical"))
