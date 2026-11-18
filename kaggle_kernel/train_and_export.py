@@ -922,8 +922,9 @@ def verify_gguf_file(gguf_path: Path) -> Dict[str, Any]:
 def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: Dict[str, str]) -> Dict[str, Any]:
     """Converts merged 4B workstation safetensors to GGUF (F16 -> Q4_K_M) using llama.cpp when available."""
     out_gguf = work_dir / variant_cfg["litertlm_filename"]
-    f16_gguf = work_dir / out_gguf.name.replace("-q4_k_m.gguf", "-f16.gguf")
-    llama_dir = work_dir / "llama.cpp"
+    tmp_root = Path("/tmp") if Path("/tmp").exists() else work_dir
+    f16_gguf = tmp_root / out_gguf.name.replace("-q4_k_m.gguf", "-f16.gguf")
+    llama_dir = tmp_root / "llama.cpp"
 
     convert_script = shutil.which("convert_hf_to_gguf.py")
     quantize_bin = shutil.which("llama-quantize")
@@ -950,19 +951,23 @@ def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: D
 
     gguf_verified = False
     gguf_check: Dict[str, Any] = {}
-    if convert_script and quantize_bin:
-        try:
-            subprocess.run(
-                [sys.executable, convert_script, str(merged_dir), "--outfile", str(f16_gguf), "--outtype", "f16"],
-                check=True,
-            )
-            subprocess.run([quantize_bin, str(f16_gguf), str(out_gguf), "Q4_K_M"], check=True)
-            if f16_gguf.exists():
-                f16_gguf.unlink()
-            gguf_check = verify_gguf_file(out_gguf)
-            gguf_verified = bool(gguf_check.get("gguf_verified"))
-        except Exception as conv_err:
-            print(f"[SautiLM-Forge] GGUF conversion error: {conv_err}")
+    try:
+        if convert_script and quantize_bin:
+            try:
+                subprocess.run(
+                    [sys.executable, convert_script, str(merged_dir), "--outfile", str(f16_gguf), "--outtype", "f16"],
+                    check=True,
+                )
+                subprocess.run([quantize_bin, str(f16_gguf), str(out_gguf), "Q4_K_M"], check=True)
+                gguf_check = verify_gguf_file(out_gguf)
+                gguf_verified = bool(gguf_check.get("gguf_verified"))
+            except Exception as conv_err:
+                print(f"[SautiLM-Forge] GGUF conversion error: {conv_err}")
+    finally:
+        if f16_gguf.exists():
+            f16_gguf.unlink(missing_ok=True)
+        if merged_dir.exists() and gguf_verified:
+            shutil.rmtree(merged_dir, ignore_errors=True)
 
     return {
         "export_format": "gguf-pc",
@@ -1198,12 +1203,18 @@ def main():
         f"| val={len(val_encoded)} (max_len={max_len})"
     )
 
-    load_dtype = torch.float16 if (device_str == "cuda" and "4b" in base_model_id.lower()) else torch.float32
-    use_fp16_amp = bool(device_str == "cuda" and load_dtype == torch.float16)
+    is_4b_model = "4b" in base_model_id.lower()
+    load_dtype = torch.bfloat16 if (device_str == "cuda" and is_4b_model) else torch.float32
+    use_fp16_amp = False
+    model_load_kwargs: Dict[str, Any] = {
+        "dtype": load_dtype,
+        "device_map": {"": 0} if device_str == "cuda" else None,
+    }
+    if is_4b_model:
+        model_load_kwargs["attn_implementation"] = "eager"
     model = AutoModelForCausalLM.from_pretrained(
         base_model_id,
-        dtype=load_dtype,
-        device_map={"": 0} if device_str == "cuda" else None,
+        **model_load_kwargs,
     )
 
     lora_r = 32 if "1b" in base_model_id.lower() else 24
@@ -1217,11 +1228,17 @@ def main():
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, peft_config)
-    if use_fp16_amp:
+    if load_dtype == torch.bfloat16:
         for param in model.parameters():
             if param.requires_grad:
-                param.data = param.data.to(torch.float32)
+                param.data = param.data.to(torch.bfloat16)
     model.print_trainable_parameters()
+
+    if train_encoded:
+        with torch.no_grad():
+            sanity_batch = collate_padded_batch(train_encoded[:1], tokenizer.pad_token_id, device)
+            sanity_loss = float(model(**sanity_batch).loss.item())
+            print(f"[SautiLM-Forge] Sanity Check Step 0 Loss: {sanity_loss:.4f} (dtype={load_dtype})")
 
     print("=== [SautiLM-Forge] Step 3: Masked LoRA SFT with True Validation & Early Stopping ===")
     target_key = variant_cfg["target"]
@@ -1255,16 +1272,21 @@ def main():
         "stem": 1.6e-4,
         "kuu-stem": 1.2e-4,
         "med": 1.6e-4,
-        "kuu-med": 8.5e-5,
+        "kuu-med": 7.5e-5,
         "agri": 1.6e-4,
         "ius": 1.6e-4,
-        "kuu-ius": 8.5e-5,
+        "kuu-ius": 7.5e-5,
         "lex": 1.5e-4,
         "jua": 1.5e-4,
     }
     lr = lr_by_target.get(target_key, 1.0e-4)
     print(f"[SautiLM-Forge] Hyperparams: target={target_key} | epochs={num_epochs} | steps={total_steps} | lr={lr}")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.02)
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=lr,
+        weight_decay=0.02,
+        eps=1e-6,
+    )
 
     def lr_lambda(step_idx: int) -> float:
         warmup = max(8, int(0.08 * total_steps))
@@ -1284,7 +1306,6 @@ def main():
     early_stopped = False
     patience = 2
 
-    use_fp16_amp = bool(device_str == "cuda" and load_dtype == torch.float16)
     scaler = torch.amp.GradScaler("cuda", enabled=use_fp16_amp)
     step = 0
     micro_step = 0
@@ -1303,11 +1324,14 @@ def main():
                 break
             batch_items = train_encoded[idx : idx + batch_size]
             batch = collate_padded_batch(batch_items, tokenizer.pad_token_id, device)
-            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=use_fp16_amp):
-                outputs = model(**batch)
-                loss = outputs.loss / grad_accum
+            outputs = model(**batch)
+            loss = outputs.loss / grad_accum
+            loss_val = float(loss.item())
+            if not math.isfinite(loss_val):
+                print(f"[SautiLM-Forge] WARNING: non-finite micro-batch loss skipped at idx={idx}")
+                continue
             scaler.scale(loss).backward()
-            accum_loss += float(loss.item())
+            accum_loss += loss_val
             micro_step += 1
 
             if micro_step % grad_accum == 0:
