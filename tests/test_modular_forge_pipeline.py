@@ -195,6 +195,39 @@ class TestModularForgePipeline(unittest.TestCase):
             self.assertTrue(res["gguf_verified"])
             self.assertEqual(res["magic"], "GGUF")
 
+    def test_kuu_identity_rewrite_and_nuru_zero_contamination_mapper(self) -> None:
+        from kaggle_kernel.train_and_export import _rewrite_row_for_target_identity, resolve_variant_config
+        from kaggle_nuru_kernel.train_nuru_vision_kaggle import _strict_map_folder
+
+        kuu_stem = resolve_variant_config(Path("."), "kuu-stem")
+        sample = {
+            "domain": "stem",
+            "system": "Tu es SautiLM-Jua-STEM.",
+            "prompt": "Qui es-tu ?",
+            "response": "Je suis SautiLM-Jua-STEM.",
+            "text": "SautiLM-Jua-STEM",
+            "messages": [{"role": "assistant", "content": "Je suis SautiLM-Jua-STEM."}],
+        }
+        rewritten = _rewrite_row_for_target_identity(sample, kuu_stem)
+        self.assertEqual(rewritten["response"], "Je suis SautiLM-Kuu-STEM.")
+        self.assertNotIn("Jua-STEM", rewritten["text"])
+        self.assertEqual(rewritten["messages"][0]["content"], "Je suis SautiLM-Kuu-STEM.")
+
+        # Zero taxonomic contamination & zero AugmentedSet leakage in Nuru-Agri
+        self.assertEqual(_strict_map_folder("plantdisease/PlantVillage/Pepper__bell___Bacterial_spot"), (None, None))
+        self.assertEqual(_strict_map_folder("plantdisease/PlantVillage/Potato___Early_blight"), (None, None))
+        self.assertEqual(_strict_map_folder("plantdisease/PlantVillage/Potato___Late_blight"), (None, None))
+        self.assertEqual(_strict_map_folder("bananalsd/BananaLSD/AugmentedSet/sigatoka"), (None, None))
+        self.assertEqual(_strict_map_folder("bananalsd/BananaLSD/OriginalSet/sigatoka"), ("banana_sigatoka", None))
+        self.assertEqual(_strict_map_folder("armyworm/final_project/worm_affected_maize_leaves"), ("maize_faw", None))
+        self.assertEqual(_strict_map_folder("ibeans/iBeans/train/bean_angular_leaf_spot"), ("bean_angular_leaf_spot", None))
+        self.assertEqual(_strict_map_folder("corn-or-maize/data/Common_Rust"), ("maize_rust", None))
+        self.assertEqual(_strict_map_folder("plantdisease/PlantVillage/Tomato_Late_blight"), ("tomato_blight", "tomato_late"))
+        self.assertEqual(_strict_map_folder("cassava-leaf-disease/data/Cassava___mosaic_disease"), ("cassava_cmd", None))
+        self.assertEqual(_strict_map_folder("cassava-leaf-disease/data/Cassava___brown_streak_disease"), ("cassava_cbsd", None))
+        self.assertEqual(_strict_map_folder("intel-image-classification/seg_train/seg_train/buildings"), ("non_plant", "non_plant_buildings"))
+        self.assertEqual(_strict_map_folder("intel-image-classification/seg_train/seg_train/forest"), (None, None))
+
 
 if __name__ == "__main__":
     unittest.main()

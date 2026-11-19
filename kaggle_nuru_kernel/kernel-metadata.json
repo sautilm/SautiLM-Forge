@@ -11,7 +11,12 @@
   "dataset_sources": [
     "georgesbyona/sautilm-nuru-agri-dataset",
     "emmarex/plantdisease",
-    "nirmalsankalana/cassava-leaf-disease-classification"
+    "nirmalsankalana/cassava-leaf-disease-classification",
+    "smaranjitghose/corn-or-maize-leaf-disease-dataset",
+    "humphreyassibi/armyworm-and-affected-plants",
+    "mitchmatheri/ibeans",
+    "shifatearman/bananalsd",
+    "puneet6060/intel-image-classification"
   ],
   "competition_sources": [],
   "kernel_sources": [],

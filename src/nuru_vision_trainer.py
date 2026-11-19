@@ -30,8 +30,8 @@ NURU_AGRI_LABELS: Tuple[str, ...] = (
     "cassava_cbsd",
     "maize_rust",
     "maize_faw",
-    "banana_bxw",
-    "bean_anthracnose",
+    "banana_sigatoka",
+    "bean_angular_leaf_spot",
     "tomato_blight",
 )
 
@@ -72,17 +72,17 @@ NURU_LABEL_TO_GEMMEA_SIGNAL: Dict[str, Dict[str, Any]] = {
         "disease_hint": "Chenille Légionnaire d'Automne (FAW)",
         "rag_query": "mais chenille legionnaire faw neem cendre push pull",
     },
-    "banana_bxw": {
+    "banana_sigatoka": {
         "is_plant_leaf": True,
         "crop_label": "Banane",
-        "disease_hint": "Flétrissement Bactérien du Bananier (BXW)",
-        "rag_query": "banane bxw xanthomonas desinfection fleur male",
+        "disease_hint": "Cercosporiose Noire du Bananier (Black Sigatoka)",
+        "rag_query": "banane sigatoka cercosporiose feuilles coupe prevention",
     },
-    "bean_anthracnose": {
+    "bean_angular_leaf_spot": {
         "is_plant_leaf": True,
         "crop_label": "Haricot",
-        "disease_hint": "Anthracnose du Haricot",
-        "rag_query": "haricot anthracnose semences saines",
+        "disease_hint": "Tache Angulaire du Haricot (Pseudocercospora griseola)",
+        "rag_query": "haricot tache angulaire semences saines rotation",
     },
     "tomato_blight": {
         "is_plant_leaf": True,

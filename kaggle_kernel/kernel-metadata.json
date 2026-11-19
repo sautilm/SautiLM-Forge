@@ -1,6 +1,6 @@
 {
-  "id": "georgesbyona/sautilm-kuu-med-forge-gpu",
-  "title": "SautiLM-Kuu-Med Forge GPU",
+  "id": "georgesbyona/sautilm-kuu-ius-forge-gpu",
+  "title": "SautiLM-Kuu-Ius Forge GPU",
   "code_file": "train_and_export.py",
   "language": "python",
   "kernel_type": "script",
@@ -9,7 +9,7 @@
   "enable_tpu": "false",
   "enable_internet": "true",
   "dataset_sources": [
-    "georgesbyona/sautilm-jua-med-corpus"
+    "georgesbyona/sautilm-kuu-ius-corpus"
   ],
   "competition_sources": [],
   "kernel_sources": [],

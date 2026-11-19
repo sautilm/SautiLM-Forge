@@ -1,19 +1,32 @@
 """
-Kaggle GPU Vision Training & Full-Integer INT8 TFLite Exporter for SautiLM-Nuru-Agri.
-Assembles leaf pathology classes from mounted PlantVillage / crop datasets and diverse
-real-world non-plant negative images (CIFAR-10 non-botanical classes), trains MobileNetV3-Small,
-and verifies <= 45 MB INT8 TFLite inference cleanly.
+Kaggle GPU Vision Training & INT8 TFLite Exporter for SautiLM-Nuru-Agri (v2 — Zero Synthetic, Zero Contamination).
+
+Strict Scientific Provenance Rules (Audit v3 §2.4 & §3.4):
+  - ZERO synthetic `np.zeros` fallback images (hard RuntimeError if any class has < 300 real photos).
+  - ZERO wrong-species/wrong-disease label contamination (no pepper as maize, no potato as bean/tomato).
+  - ZERO augmented-duplicate leakage (BananaLSD uses ONLY `OriginalSet`, never `AugmentedSet`).
+  - 9 100% botanically faithful classes across East African / DRC staple crops + CIFAR-10 non-plant:
+      0. non_plant              <- CIFAR-10 non-botanical classes (450 real photos)
+      1. healthy_leaf           <- Balanced real healthy leaves across Cassava, Maize, Bean, Banana, Tomato (450 real)
+      2. cassava_cmd            <- Makerere Cassava Leaf Disease (`train.csv` label 3)
+      3. cassava_cbsd           <- Makerere Cassava Leaf Disease (`train.csv` label 1)
+      4. maize_rust             <- Corn/Maize Leaf Disease (`Common_Rust`)
+      5. maize_faw              <- Fall Armyworm Crop Dataset (`worm_affected_maize_leaves`)
+      6. banana_sigatoka        <- BananaLSD (`OriginalSet/sigatoka` ONLY — real Black Sigatoka leaves)
+      7. bean_angular_leaf_spot <- Makerere iBeans (`bean_angular_leaf_spot` ONLY — real Uganda field leaves)
+      8. tomato_blight          <- PlantVillage (`Tomato_Early_blight` + `Tomato_Late_blight` ONLY)
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from pathlib import Path
 import random
 import shutil
 import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 NURU_AGRI_LABELS = (
@@ -23,39 +36,85 @@ NURU_AGRI_LABELS = (
     "cassava_cbsd",
     "maize_rust",
     "maize_faw",
-    "banana_bxw",
-    "bean_anthracnose",
+    "banana_sigatoka",
+    "bean_angular_leaf_spot",
     "tomato_blight",
 )
 
-
-def _map_source_folder_to_nuru_class(folder_name: str) -> str | None:
-    low = folder_name.lower()
-    if "healthy" in low:
-        return "healthy_leaf"
-    if "cmd" in low or ("cassava" in low and "mosaic" in low):
-        return "cassava_cmd"
-    if "cbsd" in low or ("cassava" in low and ("brown" in low or "streak" in low)):
-        return "cassava_cbsd"
-    if ("corn" in low or "maize" in low) and "rust" in low:
-        return "maize_rust"
-    if ("corn" in low or "maize" in low or "pepper" in low) and ("blight" in low or "spot" in low or "faw" in low):
-        return "maize_faw"
-    if ("banana" in low or "musa" in low or "cgm" in low) and ("wilt" in low or "bxw" in low or "cgm" in low or "xanthomonas" in low):
-        return "banana_bxw"
-    if ("bean" in low or "potato___early" in low) and ("anthracnose" in low or "spot" in low or "rust" in low or "blight" in low):
-        return "bean_anthracnose"
-    if ("tomato" in low or "potato___late" in low) and ("blight" in low or "spot" in low or "mosaic" in low):
-        return "tomato_blight"
-    return None
+MIN_REAL_IMAGES_PER_CLASS = 300
 
 
-def prepare_nuru_vision_dataset(work_dir: Path, input_root: Path, max_per_class: int = 450) -> Path:
-    import csv
+def _strict_map_folder(rel_path: str) -> tuple[str | None, str | None]:
+    """
+    Maps a mounted Kaggle folder path strictly to (target_class, sub_quota_bucket).
+    Returns (None, None) for any non-target species (pepper, potato, apple, etc.) or augmented copies.
+    """
+    norm = rel_path.replace("\\", "/").lower()
+    folder = norm.split("/")[-1]
+
+    # Never ingest pre-augmented sets (prevents train/val leakage of near-identical rotated copies)
+    if "augmented" in norm:
+        return None, None
+
+    # 0. Non-plant real-world high-res scenes (Intel Image Classification: buildings, street, sea, glacier, mountain — EXCLUDE forest!)
+    if "intel-image-classification" in norm and "seg_train" in norm:
+        if folder in ("buildings", "street", "sea", "glacier", "mountain"):
+            return "non_plant", f"non_plant_{folder}"
+        return None, None
+
+    # 0b. Makerere Cassava Leaf Disease folders (`data/Cassava___mosaic_disease`, `brown_streak_disease`, `healthy`)
+    if "cassava" in folder:
+        if "mosaic" in folder:
+            return "cassava_cmd", None
+        if "brown" in folder or "streak" in folder:
+            return "cassava_cbsd", None
+        if "healthy" in folder:
+            return "healthy_leaf", "healthy_cassava"
+        return None, None
+
+    # 1. Corn / Maize Common Rust & Healthy Maize
+    if folder in ("common_rust", "corn_(maize)___common_rust_"):
+        return "maize_rust", None
+    if ("corn" in norm or "maize" in norm) and folder == "healthy":
+        return "healthy_leaf", "healthy_maize"
+
+    # 2. Fall Armyworm on Maize Leaves (strictly maize FAW leaves, never pepper)
+    if folder == "worm_affected_maize_leaves":
+        return "maize_faw", None
+    if "armyworm" in norm and folder == "normal_leaves":
+        return "healthy_leaf", "healthy_maize_faw"
+
+    # 3. Makerere iBeans (Uganda): Angular Leaf Spot & Healthy Bean
+    if folder == "bean_angular_leaf_spot":
+        return "bean_angular_leaf_spot", None
+    if folder == "bean_healthy":
+        return "healthy_leaf", "healthy_bean"
+
+    # 4. BananaLSD OriginalSet ONLY: Black Sigatoka & Healthy Banana
+    if "originalset" in norm and folder == "sigatoka":
+        return "banana_sigatoka", None
+    if "originalset" in norm and folder == "healthy":
+        return "healthy_leaf", "healthy_banana"
+
+    # 5. PlantVillage Tomato Blight ONLY (NEVER Potato, NEVER Pepper)
+    if folder in ("tomato_early_blight", "tomato___early_blight"):
+        return "tomato_blight", "tomato_early"
+    if folder in ("tomato_late_blight", "tomato___late_blight"):
+        return "tomato_blight", "tomato_late"
+    if folder in ("tomato_healthy", "tomato___healthy"):
+        return "healthy_leaf", "healthy_tomato"
+
+    return None, None
+
+
+def prepare_nuru_vision_dataset(
+    work_dir: Path,
+    input_root: Path,
+    max_per_class: int = 450,
+) -> tuple[Path, Dict[str, int], Dict[str, int]]:
     from PIL import Image  # type: ignore
     import tensorflow as tf  # type: ignore
 
-    # Keep temporary training JPEGs in /tmp so /kaggle/working only stores the final .tflite & JSONs
     tmp_root = Path("/tmp") if Path("/tmp").exists() else work_dir
     ds_dir = tmp_root / "nuru_vision_ds"
     if ds_dir.exists():
@@ -64,78 +123,106 @@ def prepare_nuru_vision_dataset(work_dir: Path, input_root: Path, max_per_class:
         (ds_dir / lbl).mkdir(parents=True, exist_ok=True)
 
     counts: Dict[str, int] = {lbl: 0 for lbl in NURU_AGRI_LABELS}
+    provenance: Dict[str, int] = {}
+    sub_bucket_caps = {
+        "healthy_cassava": 95,
+        "healthy_maize": 95,
+        "healthy_maize_faw": 40,
+        "healthy_bean": 95,
+        "healthy_banana": 90,
+        "healthy_tomato": 95,
+        "tomato_early": 225,
+        "tomato_late": 225,
+        "non_plant_buildings": 90,
+        "non_plant_street": 90,
+        "non_plant_sea": 90,
+        "non_plant_glacier": 90,
+        "non_plant_mountain": 90,
+    }
+    sub_bucket_counts: Dict[str, int] = {k: 0 for k in sub_bucket_caps}
 
-    # 1. Harvest mounted leaf pathology images (PlantVillage & mounted crop datasets)
     candidate_exts = {".jpg", ".jpeg", ".png", ".webp"}
     rng = random.Random(42)
+    seen_filenames: set[tuple[str, str]] = set()
+
+    def _copy_valid_image(src: Path, target_cls: str, prov_key: str) -> bool:
+        dedup_key = (target_cls, src.name.lower())
+        if dedup_key in seen_filenames:
+            return False
+        try:
+            with Image.open(src) as im:
+                im = im.convert("RGB")
+                dst = ds_dir / target_cls / f"{target_cls}_{counts[target_cls]:04d}.jpg"
+                im.save(dst, format="JPEG", quality=92)
+            seen_filenames.add(dedup_key)
+            counts[target_cls] += 1
+            provenance[prov_key] = provenance.get(prov_key, 0) + 1
+            return True
+        except Exception:
+            return False
+
     for root, _dirs, files in os.walk(input_root):
         if not files:
             continue
-        folder_name = Path(root).name
-        # Fast-path for Kaggle cassava-leaf-disease-classification train.csv (0=CBB, 1=CBSD, 2=CGM, 3=CMD, 4=Healthy)
-        if "train.csv" in files and (Path(root) / "train_images").is_dir():
+        root_path = Path(root)
+        rel_path = str(root_path.relative_to(input_root)) if root_path != input_root else ""
+
+        # Optional CSV fast-path if a mounted Cassava archive uses train.csv + train_images/
+        if "train.csv" in files and (root_path / "train_images").is_dir():
             csv_map = {"1": "cassava_cbsd", "3": "cassava_cmd", "4": "healthy_leaf"}
-            img_dir = Path(root) / "train_images"
-            with open(Path(root) / "train.csv", "r", encoding="utf-8") as cf:
+            img_dir = root_path / "train_images"
+            with open(root_path / "train.csv", "r", encoding="utf-8") as cf:
                 rows = list(csv.DictReader(cf))
             rng.shuffle(rows)
             for row in rows:
                 t_cls = csv_map.get(str(row.get("label", "")).strip())
                 if not t_cls or counts[t_cls] >= max_per_class:
                     continue
+                if t_cls == "healthy_leaf" and sub_bucket_counts["healthy_cassava"] >= sub_bucket_caps["healthy_cassava"]:
+                    continue
                 src = img_dir / str(row.get("image_id", ""))
-                if src.exists():
-                    dst = ds_dir / t_cls / f"{t_cls}_{counts[t_cls]:04d}.jpg"
-                    shutil.copy2(src, dst)
-                    counts[t_cls] += 1
+                if src.exists() and _copy_valid_image(src, t_cls, f"makerere_cassava:{t_cls}"):
+                    if t_cls == "healthy_leaf":
+                        sub_bucket_counts["healthy_cassava"] += 1
             continue
 
-        target_cls = _map_source_folder_to_nuru_class(folder_name)
+        target_cls, bucket = _strict_map_folder(rel_path)
         if target_cls is None or counts[target_cls] >= max_per_class:
             continue
-        img_files = [Path(root) / f for f in files if Path(f).suffix.lower() in candidate_exts]
+
+        img_files = [root_path / f for f in files if Path(f).suffix.lower() in candidate_exts]
         rng.shuffle(img_files)
         for src in img_files:
             if counts[target_cls] >= max_per_class:
                 break
-            dst = ds_dir / target_cls / f"{target_cls}_{counts[target_cls]:04d}.jpg"
-            shutil.copy2(src, dst)
-            counts[target_cls] += 1
+            if bucket is not None and sub_bucket_counts.get(bucket, 0) >= sub_bucket_caps.get(bucket, 90):
+                break
+            prov_key = f"{rel_path.split(os.sep)[0] if rel_path else 'local'}:{Path(rel_path).name}"
+            if _copy_valid_image(src, target_cls, prov_key):
+                if bucket is not None:
+                    sub_bucket_counts[bucket] = sub_bucket_counts.get(bucket, 0) + 1
 
-    # 2. Populate diverse real-world non_plant negative images using CIFAR-10 non-plant photos
-    (x_train, _), _ = tf.keras.datasets.cifar10.load_data()
-    for i in range(min(max_per_class, len(x_train))):
-        img = Image.fromarray(x_train[i]).resize((224, 224))
-        img.save(ds_dir / "non_plant" / f"non_plant_{i:04d}.jpg", format="JPEG")
-        counts["non_plant"] += 1
+    # Fallback ONLY if intel-image-classification wasn't mounted locally (never downloads on Kaggle!)
+    if counts["non_plant"] < max_per_class:
+        (x_train, _), _ = tf.keras.datasets.cifar10.load_data()
+        for i in range(min(max_per_class - counts["non_plant"], len(x_train))):
+            img = Image.fromarray(x_train[i]).resize((224, 224))
+            img.save(ds_dir / "non_plant" / f"non_plant_{counts['non_plant']:04d}.jpg", format="JPEG", quality=92)
+            counts["non_plant"] += 1
+            provenance["cifar10:non_plant"] = provenance.get("cifar10:non_plant", 0) + 1
 
-    # Ensure every subfolder has at least minimal valid samples (synthetic leaf/lesion texture
-    # only if an EAC-only pathology such as cassava_cbsd or banana_bxw isn't in PlantVillage)
-    for lbl in NURU_AGRI_LABELS:
-        while counts[lbl] < 24:
-            # Derive clean botanical color-balanced texture fallback clearly tagged as fallback
-            import numpy as np  # type: ignore
+    print(f"[SautiLM-Nuru-Agri] Prepared REAL class counts: {json.dumps(counts)}")
+    print(f"[SautiLM-Nuru-Agri] Provenance breakdown: {json.dumps(provenance, indent=2)}")
 
-            arr = np.zeros((224, 224, 3), dtype=np.uint8)
-            base_g = 115 if lbl == "healthy_leaf" else (92 if "cassava" in lbl else 104)
-            arr[:, :, 0] = rng.randint(45, 95)
-            arr[:, :, 1] = base_g
-            arr[:, :, 2] = rng.randint(25, 65)
-            if lbl not in ("healthy_leaf", "non_plant"):
-                for _p in range(18):
-                    cx, cy = rng.randint(20, 200), rng.randint(20, 200)
-                    r = rng.randint(5, 16)
-                    y0, y1 = max(0, cx - r), min(224, cx + r)
-                    x0, x1 = max(0, cy - r), min(224, cy + r)
-                    arr[y0:y1, x0:x1, 0] = 195 if ("rust" in lbl or "cmd" in lbl) else 95
-                    arr[y0:y1, x0:x1, 1] = 155 if "cmd" in lbl else 70
-                    arr[y0:y1, x0:x1, 2] = 35
-            img = Image.fromarray(arr)
-            img.save(ds_dir / lbl / f"{lbl}_fallback_{counts[lbl]:04d}.jpg", format="JPEG")
-            counts[lbl] += 1
+    # HARD SCIENTIFIC INTEGRITY GATE: ZERO synthetic fallback images allowed!
+    underpopulated = {lbl: c for lbl, c in counts.items() if c < MIN_REAL_IMAGES_PER_CLASS}
+    if underpopulated:
+        raise RuntimeError(
+            f"SCIENTIFIC INTEGRITY GATE FAILED: Real image count < {MIN_REAL_IMAGES_PER_CLASS} for {underpopulated}. "
+            "Synthetic np.zeros images are strictly forbidden in SautiLM-Nuru-Agri."
+        )
 
-    print(f"[SautiLM-Nuru-Agri] Prepared class counts: {json.dumps(counts)}")
-    return ds_dir
+    return ds_dir, counts, provenance
 
 
 def main() -> None:
@@ -147,7 +234,7 @@ def main() -> None:
     input_dir = Path("/kaggle/input") if Path("/kaggle/input").exists() else Path("./data")
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    ds_dir = prepare_nuru_vision_dataset(work_dir, input_dir)
+    ds_dir, class_counts, provenance = prepare_nuru_vision_dataset(work_dir, input_dir)
 
     train_ds = tf.keras.utils.image_dataset_from_directory(
         str(ds_dir),
@@ -171,12 +258,14 @@ def main() -> None:
     aug = tf.keras.Sequential(
         [
             tf.keras.layers.RandomFlip("horizontal_and_vertical"),
-            tf.keras.layers.RandomRotation(0.1),
+            tf.keras.layers.RandomRotation(0.12),
+            tf.keras.layers.RandomContrast(0.12),
         ]
     )
-    train_ds = train_ds.map(lambda imgs, y: (aug(imgs, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
-    train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
-    val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
+    train_ds_aug = train_ds.map(
+        lambda imgs, y: (aug(imgs, training=True), y), num_parallel_calls=tf.data.AUTOTUNE
+    ).prefetch(tf.data.AUTOTUNE)
+    val_ds_pref = val_ds.prefetch(tf.data.AUTOTUNE)
 
     inputs = tf.keras.Input(shape=(224, 224, 3), name="image_rgb_224")
     x = tf.keras.applications.mobilenet_v3.preprocess_input(inputs)
@@ -187,32 +276,67 @@ def main() -> None:
         pooling="avg",
     )
     base.trainable = False
-    head = tf.keras.layers.Dropout(0.25)(base.output)
+    head = tf.keras.layers.Dropout(0.30)(base.output)
     outputs = tf.keras.layers.Dense(len(NURU_AGRI_LABELS), activation="softmax", name="probs")(head)
     model = tf.keras.Model(inputs=inputs, outputs=outputs, name="sautilm_nuru_agri")
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=3e-4),
+        optimizer=tf.keras.optimizers.Adam(learning_rate=4e-4),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-    hist = model.fit(train_ds, validation_data=val_ds, epochs=4, verbose=2)
+    hist = model.fit(train_ds_aug, validation_data=val_ds_pref, epochs=5, verbose=2)
 
-    # Fine-tune top MobileNetV3 blocks gently for real agricultural leaf specificity
+    # Gentle fine-tuning of upper MobileNetV3 blocks
     base.trainable = True
-    for layer in base.layers[:-25]:
+    for layer in base.layers[:-30]:
         layer.trainable = False
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-    hist_ft = model.fit(train_ds, validation_data=val_ds, epochs=4, verbose=2)
-    hist.history["val_accuracy"] = hist.history.get("val_accuracy", []) + hist_ft.history.get("val_accuracy", [])
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=2, restore_best_weights=True
+        )
+    ]
+    hist_ft = model.fit(train_ds_aug, validation_data=val_ds_pref, epochs=6, callbacks=callbacks, verbose=2)
+    val_acc_hist = hist.history.get("val_accuracy", []) + hist_ft.history.get("val_accuracy", [])
 
+    # Compute genuine per-class validation accuracy & macro-F1 on held-out 20% split
+    y_true_all: List[int] = []
+    y_pred_all: List[int] = []
     rep_images: List[Any] = []
-    for batch_imgs, _ in val_ds.take(4):
-        for idx in range(min(8, int(batch_imgs.shape[0]))):
-            rep_images.append(np.expand_dims(batch_imgs[idx].numpy().astype("float32"), axis=0))
+    for batch_imgs, batch_y in val_ds:
+        preds = model.predict(batch_imgs, verbose=0)
+        y_true_all.extend(batch_y.numpy().astype(int).tolist())
+        y_pred_all.extend(np.argmax(preds, axis=1).astype(int).tolist())
+        if len(rep_images) < 48:
+            for idx in range(min(6, int(batch_imgs.shape[0]))):
+                rep_images.append(np.expand_dims(batch_imgs[idx].numpy().astype("float32"), axis=0))
+
+    per_class_metrics: Dict[str, Dict[str, Any]] = {}
+    f1_scores: List[float] = []
+    for c_idx, lbl in enumerate(NURU_AGRI_LABELS):
+        tp = sum(1 for yt, yp in zip(y_true_all, y_pred_all) if yt == c_idx and yp == c_idx)
+        fp = sum(1 for yt, yp in zip(y_true_all, y_pred_all) if yt != c_idx and yp == c_idx)
+        fn = sum(1 for yt, yp in zip(y_true_all, y_pred_all) if yt == c_idx and yp != c_idx)
+        support = tp + fn
+        prec = (tp / (tp + fp)) if (tp + fp) else 0.0
+        rec = (tp / support) if support else 0.0
+        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
+        f1_scores.append(f1)
+        per_class_metrics[lbl] = {
+            "val_support": support,
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
+            "f1": round(f1, 4),
+        }
+    overall_val_acc = round(
+        sum(1 for yt, yp in zip(y_true_all, y_pred_all) if yt == yp) / max(1, len(y_true_all)),
+        4,
+    )
+    macro_f1 = round(sum(f1_scores) / max(1, len(f1_scores)), 4)
 
     def _try_convert_and_verify(full_uint8_io: bool):
         conv = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -232,18 +356,33 @@ def main() -> None:
         itp.allocate_tensors()
         in_d = itp.get_input_details()[0]
         out_d = itp.get_output_details()[0]
-        dummy_in = np.zeros(in_d["shape"], dtype=in_d["dtype"])
-        itp.set_tensor(in_d["index"], dummy_in)
-        itp.invoke()
-        out_arr = itp.get_tensor(out_d["index"])
-        return raw_bytes, in_d, out_d, out_arr
+
+        # Run real TFLite validation sample check (not just dummy zeros!)
+        correct_tflite = 0
+        checked_tflite = 0
+        for batch_imgs, batch_y in val_ds.take(4):
+            for idx in range(min(8, int(batch_imgs.shape[0]))):
+                arr = batch_imgs[idx].numpy()
+                if in_d["dtype"] == np.uint8:
+                    inp = np.expand_dims(np.clip(arr, 0, 255).astype(np.uint8), axis=0)
+                else:
+                    inp = np.expand_dims(arr.astype(np.float32), axis=0)
+                itp.set_tensor(in_d["index"], inp)
+                itp.invoke()
+                out_arr = itp.get_tensor(out_d["index"])
+                if int(np.argmax(out_arr[0])) == int(batch_y[idx].numpy()):
+                    correct_tflite += 1
+                checked_tflite += 1
+
+        tflite_sample_acc = round(correct_tflite / max(1, checked_tflite), 4)
+        return raw_bytes, in_d, out_d, out_arr, tflite_sample_acc
 
     try:
-        tflite_bytes, in_info, out_info, probe_out = _try_convert_and_verify(full_uint8_io=True)
+        tflite_bytes, in_info, out_info, probe_out, tflite_val_acc = _try_convert_and_verify(full_uint8_io=True)
         quant_recipe = "tflite_int8_full_io"
     except Exception as exc:
         print(f"[SautiLM-Nuru-Agri] Full uint8 IO rejected by XNNPACK ({exc}); using INT8 weights with float32 IO.")
-        tflite_bytes, in_info, out_info, probe_out = _try_convert_and_verify(full_uint8_io=False)
+        tflite_bytes, in_info, out_info, probe_out, tflite_val_acc = _try_convert_and_verify(full_uint8_io=False)
         quant_recipe = "tflite_int8_weights"
 
     tflite_out = work_dir / "sautilm-nuru-agri.tflite"
@@ -252,6 +391,7 @@ def main() -> None:
 
     manifest = {
         "model_name": "SautiLM-Nuru-Agri",
+        "version": "v2-certified-real-datasets",
         "format": quant_recipe,
         "input_dtype": str(np.dtype(in_info["dtype"]).name),
         "output_dtype": str(np.dtype(out_info["dtype"]).name),
@@ -259,6 +399,9 @@ def main() -> None:
         "input_shape": [224, 224, 3],
         "labels": list(NURU_AGRI_LABELS),
         "abstention_threshold": 0.55,
+        "synthetic_images_count": 0,
+        "class_counts": class_counts,
+        "source_provenance": provenance,
     }
     (work_dir / "sautilm-nuru-agri.manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -271,15 +414,22 @@ def main() -> None:
         "quantization_recipe": quant_recipe,
         "litertlm_filename": "sautilm-nuru-agri.tflite",
         "size_mb": size_mb,
+        "synthetic_images_count": 0,
+        "class_counts": class_counts,
+        "source_provenance": provenance,
         "tflite_verified": bool(probe_out.shape == (1, len(NURU_AGRI_LABELS)) and size_mb <= 45.0),
+        "tflite_val_sample_accuracy": tflite_val_acc,
         "litertlm_verified": False,
-        "final_val_accuracy": round(float(hist.history.get("val_accuracy", [0.0])[-1]), 4),
+        "final_val_accuracy": overall_val_acc,
+        "val_macro_f1": macro_f1,
+        "per_class_val_metrics": per_class_metrics,
+        "best_epoch_val_accuracy": round(float(max(val_acc_hist)) if val_acc_hist else overall_val_acc, 4),
         "elapsed_seconds": round(time.time() - t0, 2),
     }
     (work_dir / "training_metrics.json").write_text(
         json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    print(f"[SautiLM-Nuru-Agri] DONE: {tflite_out} ({size_mb} MB) | metrics={metrics}")
+    print(f"[SautiLM-Nuru-Agri] DONE: {tflite_out} ({size_mb} MB) | val_acc={overall_val_acc} | macro_f1={macro_f1} | tflite_acc={tflite_val_acc}")
 
 
 if __name__ == "__main__":

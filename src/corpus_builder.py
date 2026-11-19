@@ -10,6 +10,7 @@ try:
         generate_greetings_and_multiturn,
         generate_multilingual_domains_v11,
     )
+    from .general_replay_pairs import generate_general_replay_pairs
     from .specialty_sft_pairs import (
         generate_agri_specialty_pairs,
         generate_ius_specialty_pairs,
@@ -21,6 +22,7 @@ except ImportError:
         generate_greetings_and_multiturn,
         generate_multilingual_domains_v11,
     )
+    from general_replay_pairs import generate_general_replay_pairs
     from specialty_sft_pairs import (
         generate_agri_specialty_pairs,
         generate_ius_specialty_pairs,
@@ -1163,12 +1165,19 @@ def build_target_corpus(target: str, output_dir: Path) -> Dict[str, Any]:
             shutil.copy2(lex_path, FLUTTER_SAUTILM_ASSETS_DATA_DIR / "bbadha_full_lexicon.json")
 
     if normalized == "stem":
-        instructions = generate_stem_instructions()
+        stem_core = generate_stem_instructions()
+        # Mix ~25-30% diverse general FR/EN (60/40) reasoning, RAG & abstention replay to prevent forgetting
+        replay_stem = generate_general_replay_pairs(
+            domain_tag="stem", max_pairs=100, allow_bbadha=False, fr_en_60_40=True
+        )
+        instructions = stem_core + replay_stem
         model_series = "SautiLM-Jua-STEM"
         jsonl_name = "sautilm_jua_stem_train.jsonl"
         stats_name = "corpus_stats_stem.json"
     elif normalized == "jua":
-        instructions = _assemble_jua_instructions(raw_entries)
+        instructions = _assemble_jua_instructions(raw_entries) + generate_general_replay_pairs(
+            domain_tag="edu", max_pairs=80, allow_bbadha=False, fr_en_60_40=False
+        )
         model_series = "SautiLM-Jua"
         jsonl_name = "sautilm_v1_train.jsonl"
         stats_name = "corpus_stats.json"
@@ -1207,6 +1216,17 @@ def build_target_corpus(target: str, output_dir: Path) -> Dict[str, Any]:
                 else []
             )
             instructions = domain_builders[normalized]() + base_specialty + supplement
+
+        # Anti-forgetting replay mix (~25-30% diverse general reasoning, RAG-following & abstention)
+        if normalized in ("med", "agri", "ius", "lex"):
+            replay_cap = 80 if normalized == "lex" else 75
+            replay_rows = generate_general_replay_pairs(
+                domain_tag=normalized,
+                max_pairs=replay_cap,
+                allow_bbadha=(normalized == "lex"),
+                fr_en_60_40=False,
+            )
+            instructions = instructions + replay_rows
         model_series = f"SautiLM-Jua-{normalized.upper() if normalized == 'stem' else normalized.capitalize()}"
         jsonl_name = f"sautilm_jua_{normalized}_train.jsonl"
         stats_name = f"corpus_stats_{normalized}.json"

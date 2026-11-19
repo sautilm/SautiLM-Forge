@@ -2,9 +2,9 @@
   "model_series": "SautiLM-Jua-Agri",
   "target": "agri",
   "lexicon_count": 0,
-  "total_instructions": 272,
+  "total_instructions": 341,
   "domain_counts": {
-    "agri": 272
+    "agri": 341
   },
   "train_jsonl_path": "data/sautilm_jua_agri_train.jsonl"
 }

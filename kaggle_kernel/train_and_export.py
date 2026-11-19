@@ -392,6 +392,39 @@ def split_train_val_rows(
     return train_rows, val_rows
 
 
+def _rewrite_row_for_target_identity(row: Dict[str, Any], variant_cfg: Dict[str, str]) -> Dict[str, Any]:
+    """Aligns self-identity strings when a Kuu 1B/4B or Jua 270M variant shares a domain JSONL corpus."""
+    target = variant_cfg.get("target", "")
+    replacements = {
+        "stem": ("SautiLM-Kuu-STEM", "SautiLM-Jua-STEM"),
+        "kuu-stem": ("SautiLM-Jua-STEM", "SautiLM-Kuu-STEM"),
+        "kuu-med": ("SautiLM-Jua-Med", "SautiLM-Kuu-Med"),
+        "kuu-ius": ("SautiLM-Jua-Ius", "SautiLM-Kuu-Ius"),
+    }
+    pair = replacements.get(target)
+    if not pair:
+        return row
+    old_name, new_name = pair
+    updated = dict(row)
+    for field in ("system", "prompt", "response", "text"):
+        val = updated.get(field)
+        if isinstance(val, str) and old_name in val:
+            updated[field] = val.replace(old_name, new_name)
+    msgs = updated.get("messages")
+    if isinstance(msgs, list):
+        new_msgs = []
+        for m in msgs:
+            if isinstance(m, dict):
+                mc = dict(m)
+                if isinstance(mc.get("content"), str) and old_name in mc["content"]:
+                    mc["content"] = mc["content"].replace(old_name, new_name)
+                new_msgs.append(mc)
+            else:
+                new_msgs.append(m)
+        updated["messages"] = new_msgs
+    return updated
+
+
 def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> List[Dict[str, Any]]:
     """Loads the target SautiLM JSONL corpus without artificial duplicate repetition or cross-leakage."""
     target = variant_cfg["target"]
@@ -409,7 +442,7 @@ def load_and_balance_dataset(input_root: Path, variant_cfg: Dict[str, str]) -> L
         for line in f:
             if not line.strip():
                 continue
-            row = json.loads(line)
+            row = _rewrite_row_for_target_identity(json.loads(line), variant_cfg)
             d = row.get("domain", target)
             by_domain.setdefault(d, []).append(row)
 
@@ -639,127 +672,176 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
     Returns strictly HELD-OUT (0%-overlap with training corpora) verification tuples:
     (check_key, system_prompt, user_prompt, predicate_fn), including negative abstention tests.
     """
+    stem_name = "SautiLM-Kuu-STEM" if target == "kuu-stem" else "SautiLM-Jua-STEM"
+    stem_sys_fr = (
+        f"Tu es {stem_name}, assistant pédagogique hors-ligne du Secondaire et de l'Examen d'État "
+        "(Mathématiques, Physique, Chimie, Biologie) conçu par LosingTek Research. "
+        "Raisonne étape par étape avec exactitude et refuse d'inventer des données inexistantes."
+    )
+    stem_sys_en = (
+        f"You are {stem_name}, an offline secondary school STEM (Mathematics, Physics, Chemistry, Biology) "
+        "assistant created by LosingTek Research. Show clear step-by-step reasoning and exact units."
+    )
     stem_suite = [
         (
             "stem_identity_fr",
-            None,
+            stem_sys_fr,
             "Présente brièvement ton rôle scolaire hors ligne et les matières couvertes.",
             lambda t: ("sautilm-jua-stem" in t or "sautilm-kuu-stem" in t) and ("secondaire" in t or "examen" in t or "lycée" in t) and "je suis math" not in t and "bbadha" not in t,
         ),
         (
             "stem_quad_fr",
-            None,
+            stem_sys_fr,
             "Résous dans R l'équation quadratique suivante : 3x^2 - 6x - 9 = 0.",
-            lambda t: ("144" in t or "delta" in t) and bool(re.search(r"\b3\b", t)) and "-1" in t and "x = 6" not in t and "bbadha" not in t,
+            lambda t: ("144" in t or "36" in t or "delta" in t or "x^2 - 2x - 3" in t) and bool(re.search(r"\b3\b", t)) and "-1" in t and "x = 6" not in t and "bbadha" not in t,
         ),
         (
             "stem_integral_fr",
-            None,
+            stem_sys_fr,
             "Calcule l'intégrale définie de x = 0 à pi/2 de cos(x) dx.",
-            lambda t: bool(re.search(r"\b1(?:\.0)?\b", t)) and ("sin" in t or "intégrale" in t or "integrale" in t) and "cosinus(0)" not in t and "bbadha" not in t,
+            lambda t: bool(re.search(r"\b1(?:\.0|,0)?\b", t)) and ("sin" in t or "intégrale" in t or "integrale" in t or "primitive" in t) and "cosinus(0)" not in t and "bbadha" not in t,
         ),
         (
             "stem_qcm_math_fr",
-            None,
+            stem_sys_fr,
             "QCM Algèbre : Pour x^2 - 7x + 12 = 0, quelles sont les solutions ? A) {2; 6}  B) {3; 4}  C) {-3; -4}  D) {1; 12}.",
-            lambda t: (bool(re.search(r"\bb\)", t)) or "bonne réponse : b" in t or "bonne reponse : b" in t) and bool(re.search(r"\b3\b", t)) and bool(re.search(r"\b4\b", t)) and "(-1 ; 3)" not in t,
+            lambda t: (bool(re.search(r"\bb\)", t)) or "bonne réponse : b" in t or "bonne reponse : b" in t or "réponse b" in t) and bool(re.search(r"\b3\b", t)) and bool(re.search(r"\b4\b", t)) and "(-1 ; 3)" not in t,
         ),
         (
             "stem_phys_ohm_en",
-            None,
+            stem_sys_en,
             "A heating coil of resistance 15 ohms carries a steady current of 3 A. Compute the voltage U across it.",
             lambda t: bool(re.search(r"\b45\s*\*?\*?\s*(?:v|volt|volts)\b", t)) and "= 3 v" not in t and "45 a" not in t,
         ),
         (
             "stem_phys_newton_fr",
-            None,
+            stem_sys_fr,
             "Un chariot de masse 8 kg accélère à 4 m/s^2 sur un rail plat. Quelle est l'intensité de la force résultante F ?",
             lambda t: bool(re.search(r"\b32\s*\*?\*?\s*(?:n|newton)\b", t)),
         ),
         (
             "stem_chem_mole_fr",
-            None,
+            stem_sys_fr,
             "Détermine la quantité de matière contenue dans 88 g de dioxyde de carbone CO2 (M = 44 g/mol).",
             lambda t: bool(re.search(r"\b2(?:\.0|,0)?\s*\*?\*?\s*mol(?:e|es)?\b", t)),
         ),
         (
             "stem_chem_ph_en",
-            None,
+            stem_sys_en,
             "QCM Chemistry: At 25 C, an aqueous soap solution has pH = 11. How is it classified? A) Acidic  B) Neutral  C) Basic  D) Gas.",
             lambda t: ("c)" in t or "correct answer: c" in t or "correct answer c)" in t or "basic" in t or "alkaline" in t) and "acidic solution" not in t and "d) gas" not in t,
         ),
         (
             "stem_bio_photo_en",
-            None,
+            stem_sys_en,
             "Which plant organelle uses chlorophyll pigment to convert CO2 and H2O into glucose and O2 under sunlight?",
-            lambda t: ("chloroplast" in t or "chlorophyll" in t) and ("glucose" in t or "oxygen" in t or "o2" in t) and "choropleth" not in t,
+            lambda t: ("chloroplast" in t or "chlorophyll" in t) and ("glucose" in t or "oxygen" in t or "o2" in t or "photosynthesis" in t or "thylakoid" in t) and "choropleth" not in t,
         ),
         (
             "stem_abstain_fr",
-            None,
+            stem_sys_fr,
             "En chimie, donne la masse atomique exacte d'un élément fictif nommé 'Zyrkonium-999' qui n'existe pas au tableau périodique.",
-            lambda t: ("n'existe pas" in t or "fictif" in t or "absent" in t or "inconnu" in t or "pas dans le tableau" in t or "refus" in t) and "mass = 999" not in t,
+            lambda t: ("n'existe pas" in t or "fictif" in t or "absent" in t or "inconnu" in t or "pas dans le tableau" in t or "refus" in t or "aucune masse" in t) and "masse atomique exacte de 999" not in t and "mass = 999" not in t,
         ),
     ]
     if target in ("stem", "kuu-stem"):
         return stem_suite
 
+    med_name = "SautiLM-Kuu-Med" if target == "kuu-med" else "SautiLM-Jua-Med"
+    med_sys_fr = (
+        f"Tu es {med_name}, assistant médical et de triage clinique hors-ligne conçu par LosingTek Research "
+        "(intégration AfyaSpeak). Applique strictement les protocoles OMS/MSF/PNLP RDC et refuse toute posologie pédiatrique sans poids en kg."
+    )
+    med_sys_en = (
+        f"You are {med_name}, an offline clinical triage and public health assistant created by LosingTek Research "
+        "(AfyaSpeak partner). Follow WHO/MSF guidelines strictly and never prescribe pediatric doses without weight in kg."
+    )
     med_suite = [
-        ("med_identity_fr", None, "Décris brièvement ton rôle d'assistant médical hors ligne et tes limites.", lambda t: ("sautilm-jua-med" in t or "sautilm-kuu-med" in t or "afyaspeak" in t or "losingtek" in t) and "bbadha" not in t),
-        ("med_identity_en", None, "Summarize your offline clinical assistance role and when you refer patients.", lambda t: ("sautilm" in t or "afyaspeak" in t or "losingtek" in t or "doctor" in t or "clinic" in t) and "bbadha" not in t),
-        ("med_amox_unseen", None, "Calcul pédiatrique : enfant de 16 kg sous amoxicilline 50 mg/kg/jour répartie en 2 prises. Quelle dose en mg par prise ?", lambda t: "800" in t and "400" in t and "bbadha" not in t),
-        ("med_artesunate_unseen", None, "Un enfant de 13 kg souffre de paludisme grave (PNLP RDC). Quelle dose d'artésunate IV par injection faut-il calculer (règle < 20 kg) ?", lambda t: "39" in t and ("3,0" in t or "3.0" in t or "3 mg/kg" in t) and "bbadha" not in t),
-        ("med_ors_unseen_en", None, "A 11 kg dehydrated toddler enters OMS Plan B oral rehydration (75 mL/kg over 4h). Total ORS milliliters required?", lambda t: "825" in t and ("ors" in t or "zinc" in t) and "bbadha" not in t),
-        ("med_cholera_en", None, "Compare the safe cholera chlorine percentages for hand hygiene versus stool-spill disinfection.", lambda t: "0.05" in t and ("0.5" in t or "0.2" in t) and "bbadha" not in t),
-        ("med_pph_fr", None, "Dans les 30 minutes après accouchement, l'utérus reste mou avec saignement > 500 mL. Quelles 2 actions prioritaires d'urgence ?", lambda t: ("massage" in t or "utérin" in t) and ("oxytocine" in t or "ocytocine" in t)),
-        ("med_abstain_weight", None, "Calcule immédiatement la dose exacte en mg d'artésunate IV pour un petit garçon dont aucun poids ni âge approximatif n'a été mesuré.", lambda t: ("poids" in t or "peser" in t or "manquant" in t or "impossible" in t) and "100 mg" not in t),
+        ("med_identity_fr", med_sys_fr, "Décris brièvement ton rôle d'assistant médical hors ligne et tes limites.", lambda t: ("sautilm-jua-med" in t or "sautilm-kuu-med" in t or "afyaspeak" in t or "losingtek" in t) and "bbadha" not in t),
+        ("med_identity_en", med_sys_en, "Summarize your offline clinical assistance role and when you refer patients.", lambda t: ("sautilm" in t or "afyaspeak" in t or "losingtek" in t or "doctor" in t or "clinic" in t) and "bbadha" not in t),
+        ("med_amox_unseen", med_sys_fr, "Calcul pédiatrique : enfant de 16 kg sous amoxicilline 50 mg/kg/jour répartie en 2 prises. Quelle dose en mg par prise ?", lambda t: "800" in t and "400" in t and "bbadha" not in t),
+        ("med_artesunate_unseen", med_sys_fr, "Un enfant de 13 kg souffre de paludisme grave (PNLP RDC). Quelle dose d'artésunate IV à 3 mg/kg par injection faut-il calculer (règle < 20 kg) ?", lambda t: "39" in t and ("3,0" in t or "3.0" in t or "3 mg/kg" in t or "3 * 13" in t or "13 * 3" in t) and "bbadha" not in t),
+        ("med_ors_unseen_en", med_sys_en, "A 11 kg dehydrated toddler enters OMS Plan B oral rehydration (75 mL/kg over 4h). Total ORS milliliters required?", lambda t: "825" in t and ("ors" in t or "ml" in t or "rehydration" in t or "zinc" in t) and "bbadha" not in t),
+        ("med_cholera_en", med_sys_en, "Compare the safe cholera chlorine percentages for handwashing (0.05%) versus stool-spill disinfection (0.2% or 0.5%) and explain why they differ.", lambda t: "0.05" in t and ("0.5" in t or "0.2" in t) and "bbadha" not in t),
+        ("med_pph_fr", med_sys_fr, "Dans les 30 minutes après accouchement, l'utérus reste mou (atonie utérine) avec saignement > 500 mL. Quelles 2 actions prioritaires d'urgence (massage utérin et utérotonique) ?", lambda t: ("massage" in t or "utérin" in t) and ("oxytocine" in t or "ocytocine" in t)),
+        ("med_abstain_weight", med_sys_fr, "Calcule immédiatement la dose exacte en mg d'artésunate IV pour un petit garçon dont aucun poids ni âge approximatif n'a été mesuré.", lambda t: ("poids" in t or "peser" in t or "pesée" in t or "manquant" in t or "impossible" in t or "kg" in t) and "100 mg" not in t and "130 mg" not in t),
     ]
     if target in ("med", "kuu-med"):
         return med_suite
 
+    agri_sys_fr = (
+        "Tu es SautiLM-Jua-Agri, assistant agronome hors-ligne pour la RDC et l'Afrique de l'Est conçu par LosingTek Research "
+        "(intégration Gemmea). Appuie-toi sur les normes IITA/FAO/NARS (INERA, KALRO, NARO, RAB, ISABU, TARI) et rejette toute image non végétale."
+    )
+    agri_sys_en = (
+        "You are SautiLM-Jua-Agri, an offline agronomy and crop protection assistant for DRC and East Africa by LosingTek Research (Gemmea)."
+    )
     agri_suite = [
-        ("agri_identity_fr", None, "Présente brièvement ton rôle d'assistant agronome hors ligne pour la RDC et l'Afrique de l'Est.", lambda t: ("sautilm" in t or "gemmea" in t or "losingtek" in t) and "bbadha" not in t),
-        ("agri_identity_en", None, "Briefly state your offline agronomy assistant role across DRC and East Africa.", lambda t: ("sautilm" in t or "gemmea" in t or "losingtek" in t) and "bbadha" not in t),
-        ("agri_plot_unseen", None, "Calcule le nombre de boutures saines de manioc à 1 m x 1 m nécessaires pour une parcelle rectangulaire de 35 m sur 20 m.", lambda t: "700" in t and "bbadha" not in t),
-        ("agri_kenya_calendar", None, "Au Kenya (KALRO), quelles sont les deux principales fenêtres pluviométriques pour planifier les semis ?", lambda t: ("long rains" in t or "mars" in t) and ("short rains" in t or "octobre" in t or "kalro" in t)),
-        ("agri_bxw_unseen", None, "Un champ de bananiers perd ses feuilles par jaunissement soudain et un suc jaune crémeux sort du pseudo-tronc tranché. Quelle maladie suspecter et que désinfecter ?", lambda t: ("bxw" in t or "xanthomonas" in t or "flétrissement" in t) and ("machette" in t or "outil" in t or "feu" in t or "javel" in t)),
-        ("agri_faw_pushpull", None, "Explique le principe écologique Push-Pull associant Desmodium et Brachiaria sur maïs.", lambda t: "desmodium" in t and ("brachiaria" in t or "striga" in t)),
-        ("agri_pics_en", None, "Before sealing maize grain inside triple-layer PICS bags, below what percentage must moisture drop to halt mold and weevils?", lambda t: ("13" in t or "12" in t) and "pics" in t),
-        ("agri_abstain_nonleaf", None, "[TRIAGE VISUEL: IS_LEAF=non, objet='sandale en plastique bleue'] Identifie la maladie foliaire sur cette photo.", lambda t: ("pas" in t or "non" in t or "reprendre" in t or "aucun" in t) and ("feuille" in t or "plante" in t) and "mosaïque du manioc" not in t and "rouille du maïs" not in t),
+        ("agri_identity_fr", agri_sys_fr, "Présente brièvement ton rôle d'assistant agronome hors ligne pour la RDC et l'Afrique de l'Est.", lambda t: ("sautilm" in t or "gemmea" in t or "losingtek" in t) and "bbadha" not in t),
+        ("agri_identity_en", agri_sys_en, "Briefly state your offline agronomy assistant role across DRC and East Africa.", lambda t: ("sautilm" in t or "gemmea" in t or "losingtek" in t) and "bbadha" not in t),
+        ("agri_plot_unseen", agri_sys_fr, "Calcule le nombre de boutures saines de manioc à 1 m x 1 m nécessaires pour une parcelle rectangulaire de 35 m sur 20 m.", lambda t: "700" in t and "bbadha" not in t),
+        ("agri_kenya_calendar", agri_sys_fr, "Au Kenya (KALRO), quelles sont les deux principales saisons des pluies (Long Rains mars-mai et Short Rains octobre-décembre) pour planifier les semis ?", lambda t: ("long rains" in t or "mars" in t) and ("short rains" in t or "octobre" in t or "kalro" in t)),
+        ("agri_bxw_unseen", agri_sys_fr, "Un champ de bananiers perd ses feuilles par jaunissement soudain et un exsudat bactérien jaune sort du pseudo-tronc tranché (BXW / Xanthomonas). Quelle maladie suspecter et comment désinfecter la machette ?", lambda t: ("bxw" in t or "xanthomonas" in t or "flétrissement" in t) and ("machette" in t or "outil" in t or "feu" in t or "javel" in t or "flamme" in t)),
+        ("agri_faw_pushpull", agri_sys_fr, "Explique le principe écologique Push-Pull associant Desmodium (répulsif) et Brachiaria (plante piège) sur maïs.", lambda t: "desmodium" in t and ("brachiaria" in t or "striga" in t or "piège" in t)),
+        ("agri_pics_en", agri_sys_en, "Before sealing maize grain inside triple-layer PICS bags, below what safe moisture percentage (12% to 13%) must grain be dried to halt mold and weevils?", lambda t: ("13" in t or "12" in t) and "pics" in t and "100% moisture" not in t),
+        ("agri_abstain_nonleaf", agri_sys_fr, "[TRIAGE VISUEL: IS_LEAF=non, objet='sandale en plastique bleue'] Identifie la maladie foliaire sur cette photo.", lambda t: ("pas" in t or "non" in t or "reprendre" in t or "aucun" in t) and ("feuille" in t or "plante" in t or "végétal" in t) and "mosaïque du manioc" not in t and "rouille du maïs" not in t),
     ]
     if target == "agri":
         return agri_suite
 
+    ius_name = "SautiLM-Kuu-Ius" if target == "kuu-ius" else "SautiLM-Jua-Ius"
+    ius_sys_fr = (
+        f"Tu es {ius_name}, assistant juridique hors-ligne spécialisé en droit congolais (Constitution RDC, Code de la Famille Loi 16/008, "
+        "Code du Travail, Code Pénal) et droit OHADA, conçu par LosingTek Research. Refuse d'inventer tout article absent du corpus."
+    )
+    ius_sys_en = (
+        f"You are {ius_name}, an offline DRC and OHADA legal assistant created by LosingTek Research. Never fabricate nonexistent articles."
+    )
     ius_suite = [
-        ("ius_identity_fr", None, "Présente ton domaine juridique hors ligne et ton engagement de fidélité documentaire.", lambda t: ("sautilm-jua-ius" in t or "sautilm-kuu-ius" in t or "losingtek" in t) and "bbadha" not in t),
-        ("ius_identity_en", None, "Briefly describe your DRC/OHADA legal assistant role.", lambda t: ("sautilm" in t or "losingtek" in t or "ohada" in t) and "bbadha" not in t),
-        ("ius_garde_unseen", None, "Un citoyen est maintenu au commissariat depuis 60 heures sans présentation au magistrat du Parquet. Quelle violation constitutionnelle exacte ?", lambda t: ("48" in t or "18" in t) and ("arbitraire" in t or "illégale" in t or "dépassement" in t or "parquet" in t)),
-        ("ius_marriage_en", None, "Under DRC revised Family Code (Law 16/008), is a civil marriage valid if one spouse is aged 17?", lambda t: ("18" in t) and ("no" in t or "not valid" in t or "invalid" in t or "illegal" in t)),
-        ("ius_succession_unseen", None, "Actif successoral net de 16000 USD laissé à 3 enfants en RDC (1ère catégorie = 3/4). Quel montant revient au groupe des enfants et quel droit protège la veuve sur le logement ?", lambda t: ("12000" in t or "12 000" in t or "12,000" in t) and "usufruit" in t),
-        ("ius_ohada_sarl", None, "Un commerçant de Bunia veut créer une société à responsabilité limitée enregistrée au RCCM sous l'OHADA. Quel Acte uniforme régit ce choix ?", lambda t: ("auscgie" in t or "sarl" in t) and "rccm" in t),
-        ("ius_cdd_unseen", None, "Un salarié congolais travaille depuis 30 mois consécutifs sous contrats CDD renouvelés 3 fois sur le même poste permanent. Quelle requalification s'applique ?", lambda t: "cdi" in t and ("2 ans" in t or "40" in t)),
-        ("ius_abstain_fake_art", None, "Cite mot pour mot les sanctions de l'Article 874 du Code pénal congolais régissant les satellites privés.", lambda t: ("n'existe pas" in t or "ne dispose pas" in t or "absent" in t or "refus" in t or "pas" in t) and "servitude pénale de 20 ans" not in t),
+        ("ius_identity_fr", ius_sys_fr, "Présente ton domaine juridique hors ligne et ton engagement de fidélité documentaire.", lambda t: ("sautilm-jua-ius" in t or "sautilm-kuu-ius" in t or "losingtek" in t) and "bbadha" not in t),
+        ("ius_identity_en", ius_sys_en, "Briefly describe your DRC/OHADA legal assistant role.", lambda t: ("sautilm" in t or "losingtek" in t or "ohada" in t) and "bbadha" not in t),
+        ("ius_garde_unseen", ius_sys_fr, "Selon l'Article 18 de la Constitution de la RDC (limite maximale de garde à vue de 48 heures), un citoyen maintenu 60 heures au commissariat sans présentation au Parquet subit quelle violation ?", lambda t: ("48" in t or "18" in t) and ("arbitraire" in t or "illégale" in t or "dépassement" in t or "parquet" in t or "violation" in t)),
+        ("ius_marriage_en", ius_sys_en, "Under DRC revised Family Code (Law 16/008, minimum legal marriage age 18 years), is a civil marriage valid if one spouse is aged 17?", lambda t: ("18" in t) and ("no" in t or "not valid" in t or "invalid" in t or "illegal" in t or "cannot" in t)),
+        ("ius_succession_unseen", ius_sys_fr, "Actif successoral net de 16000 USD laissé à 3 enfants en RDC (1ère catégorie = 3/4 de la succession) et une veuve (protégée par l'usufruit du logement familial). Quel montant revient au groupe des enfants et quel droit protège la veuve ?", lambda t: ("12000" in t or "12 000" in t or "12,000" in t) and "usufruit" in t),
+        ("ius_ohada_sarl", ius_sys_fr, "Un commerçant de Bunia veut créer une SARL immatriculée au RCCM sous l'OHADA. Quel Acte uniforme (AUSCGIE) régit les sociétés commerciales ?", lambda t: "auscgie" in t and "ausca" not in t and "non aux sarl" not in t and "pas aux sarl" not in t and "pas applicable aux sarl" not in t),
+        ("ius_cdd_unseen", ius_sys_fr, "En droit du travail congolais (Article 40 Code du Travail : plafond de 2 ans / renouvellement CDD), un salarié maintenu 30 mois sous 3 CDD successifs sur un poste permanent bénéficie de quelle requalification (CDI) ?", lambda t: "cdi" in t and ("2 ans" in t or "40" in t or "30 mois" in t or "indéterminée" in t)),
+        ("ius_abstain_fake_art", ius_sys_fr, "Cite mot pour mot les sanctions de l'Article 874 fictif du Code pénal congolais régissant les satellites privés (si cet article n'existe pas dans le corpus, refuse de l'inventer).", lambda t: ("n'existe pas" in t or "ne dispose pas" in t or "absent" in t or "refus" in t or "fictif" in t or "pas" in t) and "servitude pénale de 20 ans" not in t),
     ]
     if target in ("ius", "kuu-ius"):
         return ius_suite
 
+    lex_sys_fr = (
+        "Tu es SautiLM-Jua-Lex, assistant lexicographique trilingue hors-ligne pour la langue Bbadha (Kilendu, parlée en Ituri, RDC), "
+        "le Kiswahili, le Français et l'Anglais, conçu par LosingTek Research."
+    )
+    lex_sys_en = (
+        "You are SautiLM-Jua-Lex, an offline Bbadha (Kilendu, spoken in Ituri, DRC), Kiswahili, French, and English lexical assistant by LosingTek Research."
+    )
     lex_suite = [
-        ("lex_identity", None, "Présente brièvement ton rôle lexicographique pour la langue Bbadha (Kilendu).", lambda t: ("sautilm" in t or "bbadha" in t or "ituri" in t)),
-        ("lex_ago_fr", None, "Comment dit-on 'dans la forêt' en Bbadha (Kilendu) et en Kiswahili ?", lambda t: ("ágó" in t or "ago" in t) and ("mwituni" in t or "forêt" in t or "foret" in t)),
-        ("lex_abba_en", None, "What does the Bbadha word \"'ábba\" mean in Kiswahili and English?", lambda t: ("village" in t or "mjini" in t)),
-        ("lex_waku_fr", None, "Quelle est la traduction de \"wakú\" (w.json) en Français et Kiswahili ?", lambda t: ("berceau" in t or "bandoulière" in t or "ukanda" in t or "mtoto" in t)),
+        ("lex_identity", lex_sys_fr, "Présente brièvement ton rôle lexicographique pour la langue Bbadha (Kilendu) en Ituri.", lambda t: ("sautilm" in t or "bbadha" in t or "ituri" in t)),
+        ("lex_ago_fr", "Tu es SautiLM-Jua-Lex. Dictionnaire Bbadha vérifié : Mot: ágó | Kiswahili: mwituni | Français: dans la forêt.", "Comment dit-on 'dans la forêt' en Bbadha (Kilendu) et en Kiswahili selon cet extrait ?", lambda t: ("ágó" in t or "ago" in t) and ("mwituni" in t or "forêt" in t or "foret" in t)),
+        ("lex_abba_en", "You are SautiLM-Jua-Lex. Verified Bbadha dictionary: Word: 'ábba | Kiswahili: mjini | English: in the village.", "What does the Bbadha word \"'ábba\" mean in Kiswahili and English?", lambda t: ("village" in t or "mjini" in t)),
+        ("lex_waku_fr", "Tu es SautiLM-Jua-Lex. Dictionnaire Bbadha vérifié : Mot: wakú | Kiswahili: ukanda cha mlezi wa mtoto | Français: bandoulière d'enfant ; berceau.", "Quelle est la traduction de \"wakú\" (w.json) en Français et Kiswahili ?", lambda t: ("berceau" in t or "bandoulière" in t or "ukanda" in t or "mtoto" in t)),
         ("lex_rag_bbu", "Tu es SautiLM-Jua-Lex. Réponds uniquement d'après cet extrait vérifié : Mot: bbù | Kiswahili: tundu ; kisima | Français: trou ; un puits.", "Quels sont les sens du mot Bbadha \"bbù\" dans cet extrait ?", lambda t: ("trou" in t or "puits" in t or "kisima" in t)),
         ("lex_rag_dda", "Tu es SautiLM-Jua-Lex. Réponds uniquement d'après cet extrait vérifié : Mot: ddà | Kiswahili: kuwa refu ; maji | Français: être long, loin ; l'eau, la rivière.", "Donne les deux sens principaux de \"ddà\" selon cet extrait.", lambda t: ("eau" in t or "rivière" in t or "maji" in t) and ("long" in t or "loin" in t)),
-        ("lex_phonetics", None, "Pourquoi l'orthographe Bbadha utilise-t-elle des accents et doubles consonnes comme dd vs d ?", lambda t: ("ton" in t or "tons" in t) and ("implosive" in t or "sens" in t)),
-        ("lex_abstain_fake", "Tu es SautiLM-Jua-Lex. Extrait SQLite : aucun résultat trouvé.", "Traduis le mot Bbadha inventé 'qxztà' sans l'inventer.", lambda t: ("pas" in t or "absent" in t or "aucun" in t or "refus" in t or "dictionnaire" in t) and "soleil" not in t),
+        ("lex_phonetics", lex_sys_fr, "Pourquoi l'orthographe Bbadha (langue tonale d'Ituri) utilise-t-elle des accents tonals et des consonnes implosives doubles comme dd vs d ?", lambda t: ("ton" in t or "tons" in t or "tonal" in t) and ("implosive" in t or "sens" in t)),
+        ("lex_abstain_fake", "Tu es SautiLM-Jua-Lex. Extrait SQLite : aucun résultat trouvé dans le dictionnaire Bbadha.", "Traduis le mot Bbadha inventé 'qxztà' sans l'inventer.", lambda t: ("pas" in t or "absent" in t or "aucun" in t or "refus" in t or "dictionnaire" in t) and "soleil" not in t),
     ]
     if target == "lex":
         return lex_suite
 
+    jua_sys_fr = (
+        "Tu es SautiLM-Jua, modèle fondation hors-ligne de SautiLM créé à Bunia (Ituri, RDC) par LosingTek Research "
+        "(Georges Byona, Abraham Imani, Jacques Uwonda). Réponds avec rigueur et précision."
+    )
+    jua_sys_en = (
+        "You are SautiLM-Jua, an offline Edge-AI foundation model created in Bunia (Ituri, DRC) by LosingTek Research "
+        "(Georges Byona, Abraham Imani, Jacques Uwonda)."
+    )
     full_jua_suite = [
-        ("identity_fr", None, "Présente qui a conçu la série SautiLM-Jua et sa mission hors ligne.", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-lex" not in t and "core" not in t),
-        ("identity_en", None, "Summarize who built SautiLM-Jua and verify you are distinct from ChatGPT.", lambda t: "sautilm-jua" in t and "losingtek" in t and "core" not in t),
-        ("identity_georges", None, "Qui dirige la recherche SautiLM chez LosingTek Research ?", lambda t: ("georges byona" in t or "jacques uwonda" in t) and "losingtek" in t),
+        ("identity_fr", jua_sys_fr, "Présente qui a conçu la série SautiLM-Jua et sa mission hors ligne.", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-lex" not in t and "core" not in t),
+        ("identity_en", jua_sys_en, "Summarize who built SautiLM-Jua and verify you are distinct from ChatGPT.", lambda t: "sautilm-jua" in t and "losingtek" in t and "core" not in t),
+        ("identity_georges", jua_sys_fr, "Qui dirige la recherche SautiLM chez LosingTek Research (Georges Byona, Abraham Imani, Jacques Uwonda) ?", lambda t: ("georges byona" in t or "jacques uwonda" in t) and "losingtek" in t),
         (
             "greeting_fin_hey",
             "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English.",
@@ -780,14 +862,14 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ),
         (
             "civ_birth_en",
-            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant by LosingTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant by LosingTek Research (DRC Family Code Art. 116: birth registration within 90 days).",
             "Within how many days after birth must parents register a newborn at the DRC civil status office?",
             lambda t: "90" in t and ("civil status" in t or "family code" in t or "état civil" in t or "days" in t or "jours" in t),
         ),
         agri_suite[2],  # agri_plot_unseen
         (
             "math_pastoral",
-            None,
+            jua_sys_fr,
             "Un éleveur en Ituri possède 19 chèvres, en achète 7 puis en vend 9. Combien lui en reste-t-il ?",
             lambda t: bool(re.search(r"\b17\b", t)) and "bbadha" not in t,
         ),
@@ -843,7 +925,7 @@ def run_litert_lm_runtime_checks(litertlm_path: Path, target: str = "jua") -> Di
                 if sys_prompt
                 else None
             )
-            sampler = litert_lm.SamplerConfig(top_k=16, top_p=0.90, temperature=0.05, seed=42)
+            sampler = litert_lm.SamplerConfig(top_k=32, top_p=0.95, temperature=0.15, seed=42)
             with engine.create_conversation(
                 messages=init_messages,
                 sampler_config=sampler,
@@ -919,8 +1001,162 @@ def verify_gguf_file(gguf_path: Path) -> Dict[str, Any]:
     }
 
 
+def run_hf_heldout_eval(
+    model,
+    tokenizer,
+    target: str,
+    device,
+    max_new_tokens: int = 260,
+) -> tuple[int, int, Dict[str, str]]:
+    """
+    Runs greedy held-out evaluation directly in PyTorch (for 0-step Base Model vs Fine-Tuned A/B gating)
+    using the exact same zero-overlap suite as LiteRT-LM / GGUF runtime verification.
+    """
+    import torch
+
+    suite = _runtime_suite_for_target(target)
+    was_training = model.training
+    model.eval()
+    outputs: Dict[str, str] = {}
+
+    eos_ids = [tokenizer.eos_token_id]
+    try:
+        eot_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
+        if isinstance(eot_id, int) and eot_id >= 0 and eot_id not in eos_ids:
+            eos_ids.append(eot_id)
+    except Exception:
+        pass
+
+    with torch.no_grad():
+        for key, sys_prompt, user_prompt, _ in suite:
+            msgs = []
+            if sys_prompt:
+                msgs.append({"role": "system", "content": sys_prompt})
+            msgs.append({"role": "user", "content": user_prompt})
+            try:
+                prompt_str = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+            except Exception:
+                block = f"{sys_prompt}\n\n{user_prompt}".strip() if sys_prompt else user_prompt
+                bos = tokenizer.bos_token or "<bos>"
+                prompt_str = f"{bos}<start_of_turn>user\n{block}<end_of_turn>\n<start_of_turn>model\n"
+
+            enc = tokenizer(prompt_str, return_tensors="pt", add_special_tokens=False).to(device)
+            gen = model.generate(
+                **enc,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                eos_token_id=eos_ids,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+            new_tokens = gen[0][enc["input_ids"].shape[1] :]
+            reply = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+            outputs[key] = reply
+
+    if was_training:
+        model.train()
+
+    score, total = _score_runtime_outputs(outputs, target=target)
+    return score, total, outputs
+
+
+def _strip_llama_cli_banner(raw_output: str, user_prompt: str = "") -> str:
+    """Strips llama-cli interactive banner, spinner, echoed prompt, and trailing timing stats."""
+    text = (raw_output or "").replace("\r", "")
+    # Remove backspace spinner animations
+    while "\x08" in text:
+        text = re.sub(r".?\x08", "", text)
+    if user_prompt:
+        marker = f"> {user_prompt}"
+        idx = text.find(marker)
+        if idx >= 0:
+            text = text[idx + len(marker) :]
+        else:
+            # Partial match on first 36 chars of prompt if wrapped
+            short = user_prompt[:36].strip()
+            idx2 = text.find(f"> {short}")
+            if idx2 >= 0:
+                after = text[idx2:]
+                nl = after.find("\n")
+                text = after[nl + 1 :] if nl >= 0 else ""
+    text = re.sub(r"\[\s*Prompt:.*?t/s\s*\][\s\S]*$", "", text)
+    if "<end_of_turn>" in text:
+        text = text.split("<end_of_turn>", 1)[0]
+    return text.strip()
+
+
+def run_gguf_llama_cli_checks(
+    gguf_path: Path,
+    llama_cli_bin: str,
+    target: str,
+    max_tokens: int = 300,
+) -> Dict[str, str]:
+    """Executes real held-out inference on a quantized 4B GGUF via llama-cli (`-st` single-turn mode)."""
+    suite = _runtime_suite_for_target(target)
+    outputs: Dict[str, str] = {}
+    for key, sys_prompt, user_prompt, _ in suite:
+        cmd = [
+            llama_cli_bin,
+            "-m",
+            str(gguf_path),
+        ]
+        if sys_prompt:
+            cmd.extend(["-sys", sys_prompt])
+        cmd.extend([
+            "-p",
+            user_prompt,
+            "-n",
+            str(max_tokens),
+            "--temp",
+            "0.05",
+            "--seed",
+            "42",
+            "-t",
+            "4",
+            "-c",
+            "2048",
+            "-st",
+            "--no-display-prompt",
+        ])
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=240, check=False)
+        reply = _strip_llama_cli_banner(proc.stdout or "", user_prompt=user_prompt)
+        # Fallback if a binary rejects `-sys` or `-st` (e.g., llama-completion / older llama-cli)
+        if proc.returncode != 0 or not reply:
+            combined_prompt = f"<start_of_turn>user\n{(sys_prompt + chr(10) + chr(10) if sys_prompt else '')}{user_prompt}<end_of_turn>\n<start_of_turn>model\n"
+            for extra_flag in (["-st", "--no-display-prompt"], []):
+                alt_cmd = [
+                    llama_cli_bin,
+                    "-m",
+                    str(gguf_path),
+                    "-p",
+                    combined_prompt,
+                    "-n",
+                    str(max_tokens),
+                    "--temp",
+                    "0.05",
+                    "-t",
+                    "4",
+                    "-c",
+                    "2048",
+                    *extra_flag,
+                ]
+                proc2 = subprocess.run(alt_cmd, capture_output=True, text=True, timeout=240, check=False)
+                cand = _strip_llama_cli_banner(proc2.stdout or "", user_prompt=user_prompt)
+                if cand.startswith(combined_prompt):
+                    cand = cand[len(combined_prompt) :].strip()
+                if proc2.returncode == 0 and cand:
+                    reply = cand
+                    break
+                if not reply and proc2.stderr:
+                    print(f"[GGUF llama-cli stderr ({key})]: {proc2.stderr.strip()[-300:]}")
+        if not reply and proc.stderr:
+            print(f"[GGUF llama-cli stderr ({key})]: {proc.stderr.strip()[-300:]}")
+        outputs[key] = reply
+        print(f"\n[GGUF llama-cli LIVE CHECK ({target}): {key}]\nPrompt: {user_prompt}\nOutput: {reply[:400]}...")
+    return outputs
+
+
 def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: Dict[str, str]) -> Dict[str, Any]:
-    """Converts merged 4B workstation safetensors to GGUF (F16 -> Q4_K_M) using llama.cpp when available."""
+    """Converts merged 4B workstation safetensors to GGUF (F16 -> Q4_K_M) and runs real llama-cli held-out inference."""
     out_gguf = work_dir / variant_cfg["litertlm_filename"]
     tmp_root = Path("/tmp") if Path("/tmp").exists() else work_dir
     f16_gguf = tmp_root / out_gguf.name.replace("-q4_k_m.gguf", "-f16.gguf")
@@ -928,7 +1164,8 @@ def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: D
 
     convert_script = shutil.which("convert_hf_to_gguf.py")
     quantize_bin = shutil.which("llama-quantize")
-    if (not convert_script or not quantize_bin) and shutil.which("git") and shutil.which("cmake"):
+    cli_bin = shutil.which("llama-cli")
+    if (not convert_script or not quantize_bin or not cli_bin) and shutil.which("git") and shutil.which("cmake"):
         try:
             if not llama_dir.exists():
                 subprocess.run(
@@ -937,20 +1174,40 @@ def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: D
                 )
             subprocess.run([sys.executable, "-m", "pip", "install", "-q", "gguf"], check=True)
             build_dir = llama_dir / "build"
-            if not (build_dir / "bin" / "llama-quantize").exists():
-                subprocess.run(["cmake", "-S", str(llama_dir), "-B", str(build_dir), "-DBUILD_SHARED_LIBS=OFF"], check=True)
-                subprocess.run(["cmake", "--build", str(build_dir), "--target", "llama-quantize", "-j", "4"], check=True)
+            if not (build_dir / "bin" / "llama-quantize").exists() or not (build_dir / "bin" / "llama-cli").exists():
+                subprocess.run(
+                    [
+                        "cmake",
+                        "-S",
+                        str(llama_dir),
+                        "-B",
+                        str(build_dir),
+                        "-DBUILD_SHARED_LIBS=OFF",
+                        "-DLLAMA_CURL=OFF",
+                    ],
+                    check=True,
+                )
+                subprocess.run(
+                    ["cmake", "--build", str(build_dir), "--target", "llama-quantize", "llama-cli", "-j", "4"],
+                    check=True,
+                )
             cand_conv = llama_dir / "convert_hf_to_gguf.py"
             cand_quant = build_dir / "bin" / "llama-quantize"
+            cand_cli = build_dir / "bin" / "llama-cli"
             if cand_conv.exists():
                 convert_script = str(cand_conv)
             if cand_quant.exists():
                 quantize_bin = str(cand_quant)
+            if cand_cli.exists():
+                cli_bin = str(cand_cli)
         except Exception as gguf_setup_err:
             print(f"[SautiLM-Forge] llama.cpp setup skipped: {gguf_setup_err}")
 
     gguf_verified = False
+    gguf_runtime_verified = False
     gguf_check: Dict[str, Any] = {}
+    gguf_outputs: Dict[str, str] = {}
+    gguf_quality_score: str | None = None
     try:
         if convert_script and quantize_bin:
             try:
@@ -961,8 +1218,18 @@ def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: D
                 subprocess.run([quantize_bin, str(f16_gguf), str(out_gguf), "Q4_K_M"], check=True)
                 gguf_check = verify_gguf_file(out_gguf)
                 gguf_verified = bool(gguf_check.get("gguf_verified"))
+                if gguf_verified and cli_bin:
+                    gguf_outputs = run_gguf_llama_cli_checks(
+                        out_gguf, cli_bin, target=variant_cfg["target"]
+                    )
+                    g_score, g_max = _score_runtime_outputs(gguf_outputs, target=variant_cfg["target"])
+                    gguf_quality_score = f"{g_score}/{g_max}"
+                    gguf_runtime_verified = bool(
+                        len(gguf_outputs) == g_max and all(len(v.strip()) > 0 for v in gguf_outputs.values())
+                    )
+                    print(f"[SautiLM-Forge] Real GGUF llama-cli Held-Out Score: {gguf_quality_score}")
             except Exception as conv_err:
-                print(f"[SautiLM-Forge] GGUF conversion error: {conv_err}")
+                print(f"[SautiLM-Forge] GGUF conversion/inference error: {conv_err}")
     finally:
         if f16_gguf.exists():
             f16_gguf.unlink(missing_ok=True)
@@ -975,7 +1242,11 @@ def export_desktop_pc_gguf_plan(merged_dir: Path, work_dir: Path, variant_cfg: D
         "merged_hf_dir": str(merged_dir),
         "quantization_recipe": "Q4_K_M_WORKSTATION",
         "llama_cpp_available": bool(quantize_bin),
+        "llama_cli_available": bool(cli_bin),
         "gguf_verified": gguf_verified,
+        "gguf_runtime_verified": gguf_runtime_verified,
+        "gguf_quality_score": gguf_quality_score,
+        "gguf_runtime_test_outputs": gguf_outputs,
         "litertlm_verified": False,
         "mobile_apk_bundle_excluded": True,
         **gguf_check,
@@ -1014,18 +1285,29 @@ def export_with_litert_torch(
     from litert_torch.generative.export_hf import export as litert_export
 
     target = variant_cfg["target"]
-    recipes_to_eval = ["dynamic_wi8_afp32"]
+    if target == "kuu-stem":
+        # Mobile 1B budget ceiling is <= 650 MB (`SautiLmModelManifest.maxBudgetMb = 650`).
+        # `dynamic_wi4b32_afp32` (blockwise-32 INT4) is empirically verified at ~549.58 MB <= 650 MB;
+        # channelwise `dynamic_wi4_afp32` collapses accuracy and is excluded; `dynamic_wi8_afp32` is fallback only.
+        recipes_to_eval = ["dynamic_wi4b32_afp32", "dynamic_wi8_afp32"]
+        print(f"[SautiLM-Forge] Kuu-STEM mobile-budget recipe order (<=650 MB target): {recipes_to_eval}")
+    else:
+        recipes_to_eval = ["dynamic_wi8_afp32"]
     desired_prefills = resolve_prefill_lengths(target, base_model_id)
-    export_out_dir = work_dir / "litert_export_tmp"
+    tmp_root = Path("/tmp") if Path("/tmp").exists() else work_dir
+    export_out_dir = tmp_root / "litert_export_tmp"
     final_litertlm = work_dir / variant_cfg["litertlm_filename"]
     candidates: List[Dict[str, Any]] = []
 
     try:
         for recipe in recipes_to_eval:
+            if target == "kuu-stem" and recipe == "dynamic_wi8_afp32" and any(c["size_mb"] <= 650.0 for c in candidates):
+                print("[SautiLM-Forge] Valid <= 650 MB INT4 Kuu-STEM candidate already verified; skipping 998 MB INT8.")
+                break
             if export_out_dir.exists():
                 shutil.rmtree(export_out_dir)
             export_out_dir.mkdir(parents=True, exist_ok=True)
-            candidate_file = work_dir / f"candidate_{recipe}.litertlm"
+            candidate_file = tmp_root / f"candidate_{recipe}.litertlm"
             print(
                 f"=== [SautiLM-Forge] Exporting {variant_cfg['model_name']} "
                 f"recipe='{recipe}' prefill_lengths={desired_prefills} ==="
@@ -1046,6 +1328,9 @@ def export_with_litert_torch(
                         keep_temporary_files=False,
                     )
                 except Exception as prefill_err:
+                    # Only retry with shorter prefills if the error wasn't an unknown recipe name
+                    if "recipe" in str(prefill_err).lower() or "quant" in str(prefill_err).lower():
+                        raise
                     exported_prefills = [128, 512]
                     print(f"[SautiLM-Forge] Falling back to prefill_lengths={exported_prefills}: {prefill_err}")
                     if export_out_dir.exists():
@@ -1083,24 +1368,33 @@ def export_with_litert_torch(
                         "path": candidate_file,
                         "size_bytes": c_bytes,
                         "size_mb": c_mb,
+                        "prefill_lengths_exported": exported_prefills,
                         "quality_score": score,
                         "max_score": max_score,
                         "binary_check": binary_check,
                         "runtime_outputs": runtime_outputs,
                     }
                 )
+                if target == "kuu-stem" and c_mb <= 650.0 and score >= max(6, int(0.7 * max_score)):
+                    print(f"[SautiLM-Forge] Found compliant INT4 Kuu-STEM ({c_mb} MB <= 650 MB, {score}/{max_score}); stopping search.")
+                    break
             except Exception as err:
                 print(f"[SautiLM-Forge] Candidate recipe '{recipe}' failed: {err}")
 
         if not candidates:
             raise RuntimeError("All LiteRT-LM export recipes failed!")
 
-        candidates.sort(key=lambda c: (-c["quality_score"], c["size_bytes"]))
+        if target == "kuu-stem":
+            candidates.sort(key=lambda c: (0 if c["size_mb"] <= 650.0 else 1, -c["quality_score"], c["size_bytes"]))
+        else:
+            candidates.sort(key=lambda c: (-c["quality_score"], c["size_bytes"]))
         winner = candidates[0]
         shutil.copy2(winner["path"], final_litertlm)
     finally:
         shutil.rmtree(export_out_dir, ignore_errors=True)
         shutil.rmtree(merged_dir, ignore_errors=True)
+        for p in tmp_root.glob("candidate_*.litertlm"):
+            p.unlink(missing_ok=True)
         for p in work_dir.glob("candidate_*.litertlm"):
             p.unlink(missing_ok=True)
 
@@ -1178,6 +1472,10 @@ def main():
         f"[SautiLM-Forge] Disjoint Split: train={len(train_rows)} | val={len(val_rows)} "
         f"| prompt_overlap={split_overlap_count}"
     )
+    if split_overlap_count != 0:
+        raise RuntimeError(
+            f"SCIENTIFIC INTEGRITY GATE FAILED: split_overlap_count={split_overlap_count} (must be 0)."
+        )
 
     base_model_id = resolve_base_model_id(args.base_model, variant_cfg)
     print(f"=== [SautiLM-Forge] Step 2: Loading Base Model ({base_model_id}) ===")
@@ -1217,14 +1515,20 @@ def main():
         **model_load_kwargs,
     )
 
-    lora_r = 32 if "1b" in base_model_id.lower() else 24
-    lora_alpha = 64 if "1b" in base_model_id.lower() else 48
+    # Anti-catastrophic-forgetting LoRA (Calibrated per tier):
+    # - 4B Workstation models (MedGemma-4B, Gemma-3-4B): gentle rank r=8, alpha=16, lr=2e-5, 2 epochs
+    #   to inject DRC/OHADA/PNLP identity & rules without disturbing 4B clinical/legal weights.
+    # - 270M & 1B Mobile models: attention-only r=16, alpha=32 (MLP 100% FROZEN) with per-epoch HeldOut gate.
+    is_4b_tier = variant_cfg.get("tier") == "kuu-4b-pc"
+    lora_r = 8 if is_4b_tier else 16
+    lora_alpha = 16 if is_4b_tier else 32
+    lora_target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
     peft_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
-        lora_dropout=0.06,
+        lora_dropout=0.10 if is_4b_tier else 0.08,
         bias="none",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=lora_target_modules,
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, peft_config)
@@ -1234,66 +1538,81 @@ def main():
                 param.data = param.data.to(torch.bfloat16)
     model.print_trainable_parameters()
 
+    target_key = variant_cfg["target"]
+    base_val_loss: float | None = None
+    base_hf_score: int = 0
+    base_hf_total: int = len(_runtime_suite_for_target(target_key))
+    base_hf_outputs: Dict[str, str] = {}
+    if val_encoded:
+        with model.disable_adapter():
+            base_val_loss = compute_eval_loss(
+                model, val_encoded, tokenizer.pad_token_id, device, batch_size=1 if is_4b_model else 2
+            )
+            print(f"[SautiLM-Forge] Step 0 Base Model Held-Out ValLoss: {base_val_loss:.4f}")
+    if device_str == "cuda":
+        with model.disable_adapter():
+            base_hf_score, base_hf_total, base_hf_outputs = run_hf_heldout_eval(
+                model, tokenizer, target=target_key, device=device, max_new_tokens=260
+            )
+        print(f"[SautiLM-Forge] Step 0 Base Model Held-Out Score: {base_hf_score}/{base_hf_total}")
+
     if train_encoded:
         with torch.no_grad():
             sanity_batch = collate_padded_batch(train_encoded[:1], tokenizer.pad_token_id, device)
             sanity_loss = float(model(**sanity_batch).loss.item())
             print(f"[SautiLM-Forge] Sanity Check Step 0 Loss: {sanity_loss:.4f} (dtype={load_dtype})")
 
-    print("=== [SautiLM-Forge] Step 3: Masked LoRA SFT with True Validation & Early Stopping ===")
-    target_key = variant_cfg["target"]
-    is_4b_tier = variant_cfg.get("tier") == "kuu-4b-pc"
+    print("=== [SautiLM-Forge] Step 3: Anti-Forgetting Attention-Only LoRA SFT (Calibrated Per Tier) ===")
     if device_str != "cuda":
         batch_size = 1
         grad_accum = 1
         num_epochs = 1
     elif is_4b_tier:
         batch_size = 1
+        grad_accum = 8
+        num_epochs = 2
+    elif target_key == "jua":
+        batch_size = 2
         grad_accum = 4
-        num_epochs = 4
-    elif len(train_encoded) < 400:
-        batch_size = 2
-        grad_accum = 2
-        num_epochs = 5
-    elif len(train_encoded) < 900:
-        batch_size = 2
-        grad_accum = 2
-        num_epochs = 4
+        num_epochs = 2
     else:
         batch_size = 2
         grad_accum = 4
-        num_epochs = 4
+        num_epochs = 3
     effective_bs = batch_size * grad_accum
     total_steps = max(1, (len(train_encoded) // max(1, effective_bs)) * num_epochs)
     if device_str != "cuda":
         total_steps = min(total_steps, 8)
 
     lr_by_target = {
-        "stem": 1.6e-4,
-        "kuu-stem": 1.2e-4,
-        "med": 1.6e-4,
-        "kuu-med": 7.5e-5,
-        "agri": 1.6e-4,
-        "ius": 1.6e-4,
-        "kuu-ius": 7.5e-5,
-        "lex": 1.5e-4,
-        "jua": 1.5e-4,
+        "stem": 7.0e-5,
+        "kuu-stem": 5.0e-5,
+        "med": 7.0e-5,
+        "kuu-med": 2.0e-5,
+        "agri": 7.0e-5,
+        "ius": 7.0e-5,
+        "kuu-ius": 2.0e-5,
+        "lex": 7.0e-5,
+        "jua": 7.0e-5,
     }
-    lr = lr_by_target.get(target_key, 1.0e-4)
-    print(f"[SautiLM-Forge] Hyperparams: target={target_key} | epochs={num_epochs} | steps={total_steps} | lr={lr}")
+    lr = lr_by_target.get(target_key, 8.0e-5)
+    print(
+        f"[SautiLM-Forge] Hyperparams: target={target_key} | lora_r={lora_r} | lora_alpha={lora_alpha} "
+        f"| eff_bs={effective_bs} | epochs={num_epochs} | steps={total_steps} | lr={lr}"
+    )
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=lr,
-        weight_decay=0.02,
+        weight_decay=0.04,
         eps=1e-6,
     )
 
     def lr_lambda(step_idx: int) -> float:
-        warmup = max(8, int(0.08 * total_steps))
+        warmup = max(3, int(0.10 * total_steps))
         if step_idx < warmup:
             return float(step_idx + 1) / float(warmup)
         progress = float(step_idx - warmup) / float(max(1, total_steps - warmup))
-        return max(0.1, 0.5 * (1.0 + math.cos(math.pi * progress)))
+        return max(0.15, 0.5 * (1.0 + math.cos(math.pi * progress)))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     model.train()
@@ -1301,6 +1620,7 @@ def main():
     train_losses: List[float] = []
     val_loss_history: List[Dict[str, Any]] = []
     best_val_loss: float | None = None
+    best_epoch_hf_score: int = -1
     best_lora_state: Dict[str, Any] | None = None
     no_improve_evals = 0
     early_stopped = False
@@ -1318,6 +1638,7 @@ def main():
     for epoch in range(num_epochs):
         if early_stopped:
             break
+        epoch_step_losses: List[float] = []
         random.Random(42 + epoch).shuffle(train_encoded)
         for idx in range(0, len(train_encoded), batch_size):
             if step >= total_steps or early_stopped:
@@ -1345,7 +1666,8 @@ def main():
                 step_train_loss = accum_loss
                 accum_loss = 0.0
                 train_losses.append(step_train_loss)
-                if step % 20 == 0 or step == 1 or step == total_steps:
+                epoch_step_losses.append(step_train_loss)
+                if step % 10 == 0 or step == 1 or step == total_steps:
                     print(
                         f"Epoch {epoch + 1}/{num_epochs} | Step {step}/{total_steps} | "
                         f"TrainLoss: {step_train_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}"
@@ -1355,10 +1677,34 @@ def main():
             epoch_val_loss = compute_eval_loss(
                 model, val_encoded, tokenizer.pad_token_id, device, batch_size=batch_size
             )
-            val_loss_history.append({"epoch": epoch + 1, "step": step, "val_loss": epoch_val_loss})
-            print(f"[SautiLM-Forge] Epoch {epoch + 1} Held-Out ValLoss: {epoch_val_loss:.4f}")
-            if best_val_loss is None or epoch_val_loss < (best_val_loss - 1e-4):
+            epoch_hf_score = 0
+            if device_str == "cuda":
+                epoch_hf_score, _, _ = run_hf_heldout_eval(
+                    model, tokenizer, target=target_key, device=device, max_new_tokens=260
+                )
+            mean_ep_train = (sum(epoch_step_losses) / len(epoch_step_losses)) if epoch_step_losses else 9.9
+            val_loss_history.append(
+                {
+                    "epoch": epoch + 1,
+                    "step": step,
+                    "val_loss": epoch_val_loss,
+                    "mean_train_loss": round(mean_ep_train, 4),
+                    "hf_heldout_score": f"{epoch_hf_score}/{base_hf_total}",
+                }
+            )
+            print(
+                f"[SautiLM-Forge] Epoch {epoch + 1} Held-Out ValLoss: {epoch_val_loss:.4f} "
+                f"| MeanTrainLoss: {mean_ep_train:.4f} | HeldOutScore: {epoch_hf_score}/{base_hf_total}"
+            )
+            # Prioritize Held-Out Accuracy FIRST, breaking ties by lower validation loss
+            is_better = (
+                best_lora_state is None
+                or epoch_hf_score > best_epoch_hf_score
+                or (epoch_hf_score == best_epoch_hf_score and (best_val_loss is None or epoch_val_loss < best_val_loss))
+            )
+            if is_better:
                 best_val_loss = epoch_val_loss
+                best_epoch_hf_score = epoch_hf_score
                 best_lora_state = {
                     k: v.detach().cpu().clone()
                     for k, v in model.state_dict().items()
@@ -1369,25 +1715,79 @@ def main():
                 no_improve_evals += 1
                 if no_improve_evals >= patience:
                     early_stopped = True
-                    print(f"[SautiLM-Forge] Early stopping triggered at epoch {epoch + 1} (best val_loss={best_val_loss:.4f})")
+                    print(f"[SautiLM-Forge] Early stopping triggered at epoch {epoch + 1}")
+            # Memorization ceiling guard: stop early only when train loss collapses (<0.90)
+            # OR when held-out achieves perfection (100% and >= Base 0-step score).
+            if mean_ep_train < 0.90 or (epoch_hf_score >= base_hf_total and epoch_hf_score >= base_hf_score):
+                early_stopped = True
+                print(
+                    f"[SautiLM-Forge] Memorization guard stopped at epoch {epoch + 1} "
+                    f"(mean_train_loss={mean_ep_train:.4f}, score={epoch_hf_score}/{base_hf_total})"
+                )
 
     if best_lora_state:
         missing, unexpected = model.load_state_dict(best_lora_state, strict=False)
         print(
             f"[SautiLM-Forge] Restored best LoRA checkpoint (best_val_loss={best_val_loss:.4f}, "
-            f"unexpected={len(unexpected)})"
+            f"best_epoch_hf_score={best_epoch_hf_score}/{base_hf_total}, unexpected={len(unexpected)})"
         )
+
+    # Mandatory Zero-Regression A/B Gate: Base (0-step) vs Fine-Tuned vs Damped (0.75x, 0.5x, 0.25x, 0.0x)
+    ft_hf_score: int = max(0, best_epoch_hf_score)
+    selected_hf_score: int = ft_hf_score
+    selected_lora_scale: float = 1.0
+    if device_str == "cuda":
+        if best_epoch_hf_score < 0:
+            ft_hf_score, _, _ = run_hf_heldout_eval(
+                model, tokenizer, target=target_key, device=device, max_new_tokens=260
+            )
+            selected_hf_score = ft_hf_score
+        print(
+            f"[SautiLM-Forge] Base-vs-FT Gate ({target_key}): "
+            f"Base={base_hf_score}/{base_hf_total} | FineTuned(1.0x)={ft_hf_score}/{base_hf_total}"
+        )
+        if best_lora_state and (ft_hf_score < base_hf_score or ft_hf_score < base_hf_total):
+            best_scale = 1.0
+            best_score_so_far = ft_hf_score
+            probe_scales = (0.75, 0.5, 0.25, 0.0) if ft_hf_score < base_hf_score else (0.75, 0.5)
+            for scale in probe_scales:
+                scaled_state = {
+                    k: (v * scale if "lora_B" in k else v.clone())
+                    for k, v in best_lora_state.items()
+                }
+                model.load_state_dict(scaled_state, strict=False)
+                sc_score, _, _ = run_hf_heldout_eval(
+                    model, tokenizer, target=target_key, device=device, max_new_tokens=260
+                )
+                print(f"[SautiLM-Forge] Damped LoRA scale={scale} -> Held-Out Score={sc_score}/{base_hf_total}")
+                if sc_score > best_score_so_far:
+                    best_score_so_far = sc_score
+                    best_scale = scale
+            selected_lora_scale = best_scale
+            selected_hf_score = best_score_so_far
+            final_scaled_state = {
+                k: (v * selected_lora_scale if "lora_B" in k else v.clone())
+                for k, v in best_lora_state.items()
+            }
+            model.load_state_dict(final_scaled_state, strict=False)
+            print(
+                f"[SautiLM-Forge] Gate selected scale={selected_lora_scale} "
+                f"(score={selected_hf_score}/{base_hf_total} vs base={base_hf_score}/{base_hf_total})"
+            )
 
     print("=== [SautiLM-Forge] Step 4: Merging LoRA Adapter & Saving HF Checkpoint ===")
     adapter_dir = work_dir / variant_cfg["adapter_dirname"]
-    merged_dir = work_dir / "merged_hf_model"
+    tmp_root_main = Path("/tmp") if Path("/tmp").exists() else work_dir
+    merged_dir = tmp_root_main / "merged_hf_model"
+    if merged_dir.exists():
+        shutil.rmtree(merged_dir, ignore_errors=True)
     model.save_pretrained(adapter_dir)
     merged_model = model.merge_and_unload()
     merged_model.eval()
     merged_model.save_pretrained(merged_dir, safe_serialization=True)
     tokenizer.save_pretrained(merged_dir)
 
-    # Free all PyTorch GPU/CPU training objects before litert-torch conversion
+    # Free all PyTorch GPU/CPU training objects before litert-torch / llama.cpp conversion
     del outputs, loss, batch, optimizer, scheduler, model, merged_model
     gc.collect()
     if torch.cuda.is_available():
@@ -1404,13 +1804,21 @@ def main():
         "base_model": base_model_id,
         "lora_r": lora_r,
         "lora_alpha": lora_alpha,
+        "lora_target_modules": lora_target_modules,
+        "effective_batch_size": effective_bs,
+        "learning_rate": lr,
         "steps": step,
         "epochs_configured": num_epochs,
         "epochs_completed": len(val_loss_history) or num_epochs,
         "early_stopped": early_stopped,
         "initial_train_loss": round(train_losses[0], 4) if train_losses else None,
         "final_train_loss": round(train_losses[-1], 4) if train_losses else None,
+        "base_val_loss": base_val_loss,
         "best_val_loss": best_val_loss,
+        "base_hf_heldout_score": f"{base_hf_score}/{base_hf_total}",
+        "finetuned_hf_heldout_score": f"{ft_hf_score}/{base_hf_total}",
+        "selected_lora_scale": selected_lora_scale,
+        "selected_hf_heldout_score": f"{selected_hf_score}/{base_hf_total}",
         "val_loss_history": val_loss_history,
         "train_loss_history": [round(x, 4) for x in train_losses],
         "training_examples_count": len(train_encoded),

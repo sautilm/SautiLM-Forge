@@ -90,8 +90,8 @@ def _target_config(target: str = "jua") -> Dict[str, str]:
             "corpus_domain": domain,
             "variant": f"sautilm-kuu-{domain}",
             "model_name": f"SautiLM-Kuu-{suffix}",
-            "dataset_slug": f"sautilm-jua-{domain}-corpus",
-            "dataset_title": f"SautiLM-Jua-{suffix} Standalone Domain Corpus",
+            "dataset_slug": f"sautilm-kuu-{domain}-corpus",
+            "dataset_title": f"SautiLM-Kuu-{suffix} Standalone Domain Corpus",
             "kernel_slug": f"sautilm-kuu-{domain}-forge-gpu",
             "kernel_title": f"SautiLM-Kuu-{suffix} Forge GPU",
             "hf_repo": f"SautiLM-Kuu-{suffix}",
@@ -188,12 +188,13 @@ def publish_dataset_to_kaggle(
                 "cassava_cbsd",
                 "maize_rust",
                 "maize_faw",
-                "banana_bxw",
-                "bean_anthracnose",
+                "banana_sigatoka",
+                "bean_angular_leaf_spot",
                 "tomato_blight",
             ],
             "abstention_threshold": 0.55,
             "max_model_mb": 45.0,
+            "synthetic_images_allowed": False,
         }
         (staging_dir / cfg["jsonl_filename"]).write_text(
             json.dumps(manifest_payload, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -278,6 +279,11 @@ def push_gpu_kernel_to_kaggle(dataset_ref: str, target: str = "jua") -> str:
         dataset_sources.extend([
             "emmarex/plantdisease",
             "nirmalsankalana/cassava-leaf-disease-classification",
+            "smaranjitghose/corn-or-maize-leaf-disease-dataset",
+            "humphreyassibi/armyworm-and-affected-plants",
+            "mitchmatheri/ibeans",
+            "shifatearman/bananalsd",
+            "puneet6060/intel-image-classification",
         ])
 
     kernel_meta = {
@@ -359,18 +365,32 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "ju
         or "Pending build"
     )
     quant_recipe = (metrics or {}).get("quantization_recipe") or cfg.get("export_format") or "dynamic_wi8_afp32"
-    lora_r = (metrics or {}).get("lora_r", 16)
-    lora_alpha = (metrics or {}).get("lora_alpha", 32)
-    quality_score = (metrics or {}).get("litertlm_quality_score", "Pending")
-    best_val_loss = (metrics or {}).get("best_val_loss")
-    final_loss_raw = (metrics or {}).get("final_train_loss") or (metrics or {}).get("final_loss")
+    lora_r = (metrics or {}).get("lora_r", 8)
+    lora_alpha = (metrics or {}).get("lora_alpha", 16)
+    m = metrics or {}
+    if t_key == "nuru-agri" and m.get("final_val_accuracy") is not None:
+        val_pct = float(m["final_val_accuracy"]) * 100.0
+        f1_pct = float(m.get("val_macro_f1", m["final_val_accuracy"])) * 100.0
+        synth_cnt = m.get("synthetic_images_count", 0)
+        quality_score = f"Val Acc {val_pct:.1f}% | Macro-F1 {f1_pct:.1f}% | {synth_cnt} synthetic"
+    else:
+        quality_score = m.get("litertlm_quality_score") or m.get("gguf_quality_score") or "Pending"
+    base_vs_ft = ""
+    if m.get("base_hf_heldout_score") and m.get("selected_hf_heldout_score"):
+        base_vs_ft = f" (Base 0-step: `{m['base_hf_heldout_score']}` -> Selected: `{m['selected_hf_heldout_score']}`)"
+    best_val_loss = m.get("best_val_loss")
+    final_loss_raw = m.get("final_train_loss") or m.get("final_loss")
     final_loss = f"{final_loss_raw:.4f}" if isinstance(final_loss_raw, (int, float)) else "Pending"
     val_loss_str = f"{best_val_loss:.4f}" if isinstance(best_val_loss, (int, float)) else "Pending"
-    steps = (metrics or {}).get("steps", "Pending")
+    steps = m.get("steps", "Pending")
     verified_flag = bool(
-        metrics and (metrics.get("litertlm_verified") or metrics.get("gguf_verified") or metrics.get("size_mb"))
+        m and (m.get("litertlm_verified") or m.get("gguf_runtime_verified") or m.get("tflite_verified"))
     )
-    verified_badge = f"Verified Runtime ({quality_score})" if verified_flag else "Pending Runtime Verification"
+    verified_badge = (
+        f"Verified Runtime ({quality_score}){base_vs_ft}"
+        if verified_flag
+        else (f"Header Verified Only ({quality_score})" if m.get("gguf_verified") else "Pending Runtime Verification")
+    )
 
     return f"""---
 license: gemma
@@ -501,6 +521,13 @@ def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") 
             hf_api.upload_file(
                 path_or_fileobj=str(manifest_file),
                 path_in_repo=manifest_file.name,
+                repo_id=repo_id,
+                repo_type="model",
+            )
+        if metrics_file.exists():
+            hf_api.upload_file(
+                path_or_fileobj=str(metrics_file),
+                path_in_repo="training_metrics.json",
                 repo_id=repo_id,
                 repo_type="model",
             )

@@ -701,13 +701,17 @@ def generate_stem_instructions() -> List[Dict[str, Any]]:
       - Total: 750 rows.
     """
     out: List[Dict[str, Any]] = []
-    for q, a in _french_stem_pairs():
-        out.append(_stem_turn("fr", STEM_SYSTEM_FR, q, a))
-        out.append(_stem_turn("fr", None, q, a))
+    for idx, (q, a) in enumerate(_french_stem_pairs()):
+        first_sys = STEM_SYSTEM_FR if idx % 2 == 0 else None
+        second_sys = None if idx % 2 == 0 else STEM_SYSTEM_FR
+        out.append(_stem_turn("fr", first_sys, q, a))
+        out.append(_stem_turn("fr", second_sys, q, a))
 
-    for q, a in _english_stem_pairs():
-        out.append(_stem_turn("en", STEM_SYSTEM_EN, q, a))
-        out.append(_stem_turn("en", None, q, a))
+    for idx, (q, a) in enumerate(_english_stem_pairs()):
+        first_sys = STEM_SYSTEM_EN if idx % 2 == 0 else None
+        second_sys = None if idx % 2 == 0 else STEM_SYSTEM_EN
+        out.append(_stem_turn("en", first_sys, q, a))
+        out.append(_stem_turn("en", second_sys, q, a))
 
     stem_greetings_identity = [
         ("fr", STEM_SYSTEM_FR, "Qui es-tu ?",
