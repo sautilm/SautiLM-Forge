@@ -12,9 +12,10 @@ It powers the **SautiLM** family of offline mobile language models engineered fo
 
 ## 1. SautiLM Foundation Series & 10 Specialized Domain Models
 
-### Three Official Product Series (Strict Naming)
-- **`SautiLM-Jua`** (`270M` INT8 LiteRT-LM, `~283.48 MB`, `dynamic_wi8_afp32`, multi-prefill `[128, 512, 1024]`) : Standard mobile foundation & domain models (`SautiLM-Jua`, `SautiLM-Jua-STEM`, `SautiLM-Jua-Lex`, `SautiLM-Jua-Med`, `SautiLM-Jua-Agri`, `SautiLM-Jua-Ius`, `SautiLM-Jua-Fin`, `SautiLM-Jua-Civ`).
+### Official Product Series (Strict Naming)
+- **`SautiLM-Radi`** *(planned ultra-fast / Flash tier, `~5-150 MB`, `< 50 ms`, Swahili *Lightning*)* : Ultra-low-latency reflex classifiers, intent/language routing, and real-time voice/VAD models.
 - **`SautiLM-Nuru`** (`TFLite INT8`, `<= 45 MB` — e.g. `SautiLM-Nuru-Agri` at `1.074 MB`, 9 classes with `non_plant` rejection gate at `< 0.55`) : Fast collaborative mobile vision classifiers passing structured triage to SQLite FTS5 RAG + `Jua`/`Kuu`.
+- **`SautiLM-Jua`** (`270M` INT8 LiteRT-LM, `~283.48 MB`, `dynamic_wi8_afp32`, multi-prefill `[128, 512, 1024]`) : Standard mobile foundation & domain models (`SautiLM-Jua`, `SautiLM-Jua-STEM`, `SautiLM-Jua-Lex`, `SautiLM-Jua-Med`, `SautiLM-Jua-Agri`, `SautiLM-Jua-Ius`, `SautiLM-Jua-Fin`, `SautiLM-Jua-Civ`).
 - **`SautiLM-Kuu`** (`1B` mobile/tablet LiteRT-LM `SautiLM-Kuu-STEM` for `AndaaEdge.com` / `Shul'etu` PDF quiz & EXETAT solving; `4B` Desktop PC `GGUF Q4_K_M` `SautiLM-Kuu-Med` & `SautiLM-Kuu-Ius` for `AfyaSpeak` & DRC courts, strictly excluded from mobile APKs).
 
 ### 10 Specialized Domain Modules

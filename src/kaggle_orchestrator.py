@@ -397,12 +397,13 @@ pipeline_tag: {pipeline_tag}
 
 **{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
 
-Part of SautiLM's strict 3-tier architecture (**SautiLM-Jua** 270M mobile standard, **SautiLM-Nuru** TFLite <= 45 MB vision classifiers, and **SautiLM-Kuu** 1B mobile / 4B Desktop workstations). Zero-leakage training on **{corpus_total:,} verified examples** with `litert-torch` (`{quant_recipe}`) / INT8 quantization.
+Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile standard, **SautiLM-Nuru** `TFLite <= 45 MB` collaborative vision classifiers, **SautiLM-Kuu** `1B` mobile / `4B` Desktop workstations, and the planned **SautiLM-Radi** `< 50 ms` ultra-fast Flash tier). Zero-leakage training on **{corpus_total:,} verified examples** with `litert-torch` (`{quant_recipe}`) / INT8 quantization.
 
 ## SautiLM Modular Ecosystem
+- **SautiLM-Nuru** (`<= 45 MB` TFLite INT8 Collaborative Vision): `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
 - **SautiLM-Jua** (`270M` Mobile LiteRT-LM): `SautiLM-Jua-STEM`, `SautiLM-Jua-Lex` (Bbadha 1,150 entries), `SautiLM-Jua-Med`, `SautiLM-Jua-Agri`, `SautiLM-Jua-Ius` (DRC/OHADA Law), `SautiLM-Jua-Fin`, `SautiLM-Jua-Civ`
-- **SautiLM-Nuru** (`<= 45 MB` TFLite INT8): `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
 - **SautiLM-Kuu** (`1B` Mobile / `4B` PC GGUF): `SautiLM-Kuu-STEM`, `SautiLM-Kuu-Med` (AfyaSpeak PC), `SautiLM-Kuu-Ius` (DRC Courts PC)
+- **SautiLM-Radi** *(Planned Ultra-Fast / Flash Tier, Swahili Lightning)*: ultra-low-latency (`< 50 ms`) routing, reflex classification, and real-time voice/VAD
 
 ## Technical Specifications
 

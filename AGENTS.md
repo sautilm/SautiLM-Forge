@@ -9,8 +9,11 @@ This file guides developers and AI coding assistants working in `Python/SautiLM-
 
 ## Architecture & Naming Rules (Strict)
 
-1. **Three Official Product Series (Strict Naming — Ask Founder Before Adding Any New Prefix):**
-   * **`SautiLM-Jua`** (`270M` INT8, `~272 MB` — common/standard mobile models, never *SautiLM-Jua-Core*):
+1. **Official Product Series (Strict Naming — Ask Founder Before Adding Any New Prefix):**
+   * **`SautiLM-Radi`** *(planned ultra-fast / Flash tier: Swahili *Lightning*, `~5–150 MB`, `< 50 ms` latency — intent routing, language detection, tiny classifiers, and real-time voice/VAD on low-RAM phones).*
+   * **`SautiLM-Nuru`** (Lightweight, fast collaborative Vision models in `TFLite INT8`, target `~1–45 MB`, passing structured detections/OCR to SQLite RAG + `Jua`/`Kuu` instead of `1.5 GB+` mobile VLM downloads):
+     * `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
+   * **`SautiLM-Jua`** (`270M` INT8, `~283.48 MB` — common/standard mobile models, never *SautiLM-Jua-Core*):
      * `SautiLM-Jua-STEM` (Secondary Education & DRC Examen d'État — Maths, Physics, Chemistry, Biology)
      * `SautiLM-Jua-Lex` (Bbadha / Kilendu, Kiswahili, French, English lexicon & translation)
      * `SautiLM-Jua-Med` (Community Health & Mobile Triage)
@@ -19,9 +22,7 @@ This file guides developers and AI coding assistants working in `Python/SautiLM-
      * `SautiLM-Jua-Fin` (Finance & Accounting)
      * `SautiLM-Jua-Civ` (Civic Administration & Mediation)
      * `SautiLM-Jua-Voice`, `SautiLM-Jua-Vision`
-   * **`SautiLM-Nuru`** (Lightweight, fast collaborative Vision models in `TFLite INT8`, target `~15-45 MB`, passing structured detections/OCR to SQLite RAG + `Jua`/`Kuu` instead of `1.5 GB+` mobile VLM downloads):
-     * `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
-   * **`SautiLM-Kuu`** (High-capacity tier: compact `1B` `< 650 MB` for capable mobile/tablets & `4B` Desktop PC/Station):
+   * **`SautiLM-Kuu`** (High-capacity tier: compact `1B` mobile/tablets & `4B` Desktop PC/Station):
      * `SautiLM-Kuu-STEM` (`1B` compact for AndaaEdge / PDF quiz & exam solving)
      * `SautiLM-Kuu-Med` (`4B` Desktop PC for AfyaSpeak live offline clinical assistant)
      * `SautiLM-Kuu-Ius` (`4B` Desktop PC for lawyers, magistrates & DRC courts)
