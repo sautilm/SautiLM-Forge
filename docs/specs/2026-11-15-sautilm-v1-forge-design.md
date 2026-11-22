@@ -1,7 +1,7 @@
 # Spécification Architecturale : SautiLM-Forge & SautiLM-v1 (<= 150 Mo)
 
 - **Date** : 15 Novembre 2026
-- **Organisation** : LosingTek Research (Bunia, Ituri, RD Congo)
+- **Organisation** : MusanTek Research (Bunia, Ituri, RD Congo)
 - **Auteurs** : Georges Byona, Abraham Imani, Jacques Uwonda
 - **Dépôts Cibles** :
   - Pipeline ML & Distillation : `C:\Users\ADMIN\Desktop\MiProjects\Python\SautiLM-Forge`
@@ -74,7 +74,7 @@ Le générateur local transforme les sources vérifiées en un jeu d'instruction
      - Traduction de phrases complètes Bbadha $\leftrightarrow$ Swahili et Bbadha $\leftrightarrow$ Français.
      - Questions grammaticales et phonétiques sur le Bbadha (Kilendu).
 2. **Corpus Spécialisé Multi-Domaines (Socle des futurs modèles SautiLM)** :
-   - **`SautiLM-Identity`** : Questions/réponses en Français, Swahili, Anglais et Bbadha sur l'identité de SautiLM, LosingTek Research (Bunia, Ituri), la mission humanitaire et le respect strict du formatage (zéro émoji, zéro tiret long `—`).
+   - **`SautiLM-Identity`** : Questions/réponses en Français, Swahili, Anglais et Bbadha sur l'identité de SautiLM, MusanTek Research (Bunia, Ituri), la mission humanitaire et le respect strict du formatage (zéro émoji, zéro tiret long `—`).
    - **`SautiLM-Edu` & `SautiLM-Med`** : Modules d'environnement (cycle de l'eau, énergie solaire, érosion), santé communautaire (prévention du choléra, purification de l'eau, premiers secours) et médecine vétérinaire pastorale.
    - **`SautiLM-Math`** : Problèmes arithmétiques contextualisés (gestion de bétail, vente de lait, partage de fournitures scolaires, géométrie pratique) avec décomposition étape par étape.
    - **`SautiLM-Ius` (Droit Congolais)** : Corpus fondamental sur la Constitution de la RDC, le Code de la Famille, le Code Pénal et le Code du Travail pour assister les citoyens, avocats et magistrats hors-ligne.

@@ -332,31 +332,66 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "ju
 
     if t_key == "kuu-stem":
         default_base = "google/gemma-3-1b-it"
+        hf_license = "gemma"
+        license_extra_yaml = ""
+        license_notice = "Governed by the [Gemma Terms of Use](https://ai.google.dev/gemma/terms)."
         arch_desc = "Google Gemma 3 1B (`Gemma3ForCausalLM`, 26 layers, `hidden_size=1152`, `cache_length=2048`)"
+        export_toolchain = "`litert-torch` (`dynamic_wi4b32_afp32` INT4 mobile quantization)"
         lib_name = "litert-lm"
         pipeline_tag = "text-generation"
         target_hw = "AndaaEdge / Shul'etu Capable Mobile & Tablet (Android 8.0+, >= 4 GB RAM)"
     elif t_key == "kuu-med":
         default_base = "google/medgemma-4b-it"
-        arch_desc = "Google MedGemma 4B IT quantized GGUF `Q4_K_M` (`n_ctx=4096`)"
+        hf_license = "other"
+        license_extra_yaml = (
+            "license_name: health-ai-developer-foundations\n"
+            "license_link: https://developers.google.com/health-ai-developer-foundations/terms\n"
+        )
+        license_notice = (
+            "Derived from `google/medgemma-4b-it` and governed by the "
+            "[Google Health AI Developer Foundations (HAI-DEF) Terms of Use]"
+            "(https://developers.google.com/health-ai-developer-foundations/terms) — "
+            "NOT standard Gemma terms. **Pre-pilot clinical research prototype only**; not a certified medical device."
+        )
+        arch_desc = "Google MedGemma 4B IT quantized via `llama.cpp` GGUF `Q4_K_M` (`n_ctx=4096`)"
+        export_toolchain = "`llama.cpp` (`Q4_K_M` GGUF 4-bit Desktop quantization)"
         lib_name = "gguf"
         pipeline_tag = "text-generation"
-        target_hw = "AfyaSpeak Desktop PC / Clinic Workstation (>= 8 GB RAM; excluded from mobile APKs)"
+        target_hw = "AfyaSpeak Desktop PC / Clinic Workstation (>= 8 GB RAM, Vulkan/CUDA GPU recommended; excluded from mobile APKs)"
     elif t_key == "kuu-ius":
         default_base = "google/gemma-3-4b-it"
-        arch_desc = "Google Gemma 3 4B IT quantized GGUF `Q4_K_M` (`n_ctx=4096`)"
+        hf_license = "gemma"
+        license_extra_yaml = ""
+        license_notice = (
+            "Governed by the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). "
+            "**Pre-pilot legal research prototype**; requires clinician/lawyer verification."
+        )
+        arch_desc = "Google Gemma 3 4B IT quantized via `llama.cpp` GGUF `Q4_K_M` (`n_ctx=4096`)"
+        export_toolchain = "`llama.cpp` (`Q4_K_M` GGUF 4-bit Desktop quantization)"
         lib_name = "gguf"
         pipeline_tag = "text-generation"
-        target_hw = "Legal Desktop Workstation for DRC Courts & Lawyers (>= 8 GB RAM; excluded from mobile APKs)"
+        target_hw = "Legal Desktop Workstation for DRC Courts & Lawyers (>= 8 GB RAM, Vulkan/CUDA GPU recommended; excluded from mobile APKs)"
     elif t_key == "nuru-agri":
         default_base = "tf.keras.applications.MobileNetV3Small"
-        arch_desc = "MobileNetV3-Small Full-Integer INT8 TFLite (`224x224x3 uint8`, 9 EAC crop + `non_plant` classes)"
+        hf_license = "apache-2.0"
+        license_extra_yaml = ""
+        license_notice = (
+            "Model weights and TFLite export released under **Apache-2.0** "
+            "(trained from `tf.keras.applications.MobileNetV3Small` on public agricultural datasets; "
+            "no Gemma/MedGemma weights used)."
+        )
+        arch_desc = "MobileNetV3-Small TFLite INT8 weights (`224x224x3 float32 [0..255]` input, 9 EAC crop + `non_plant` classes)"
+        export_toolchain = "TensorFlow / Keras + LiteRT `1.4.2` (`int8` dynamic/full-integer TFLite)"
         lib_name = "tflite"
         pipeline_tag = "image-classification"
-        target_hw = "Gemmea Mobile Collaborative Pass-1 Vision (CPU/NNAPI, <= 45 MB)"
+        target_hw = "Juamea (`com.musantek.juamea`) Mobile Pass-1 Vision (Pixel 7 measured: 49.73 ms/img, E2E 110 ms)"
     else:
         default_base = "google/gemma-3-270m-it"
+        hf_license = "gemma"
+        license_extra_yaml = ""
+        license_notice = "Governed by the [Gemma Terms of Use](https://ai.google.dev/gemma/terms)."
         arch_desc = "Google Gemma 3 270M IT (`Gemma3ForCausalLM`, 18 layers, `hidden_size=640`, `cache_length=2048`)"
+        export_toolchain = "`litert-torch` (`dynamic_wi8_afp32` INT8 mobile quantization)"
         lib_name = "litert-lm"
         pipeline_tag = "text-generation"
         target_hw = "Android 8.0+ (API 26+), >= 2 GB RAM, ARM Cortex-A53/A55 CPU"
@@ -364,28 +399,41 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "ju
     base_model = (metrics or {}).get("base_model") or default_base
     size_mb = (
         (metrics or {}).get("litertlm_size_mb")
+        or (metrics or {}).get("tflite_size_mb")
         or (metrics or {}).get("size_mb")
-        or "Pending build"
+        or ("1.07" if t_key == "nuru-agri" else "Pending build")
     )
-    quant_recipe = (metrics or {}).get("quantization_recipe") or cfg.get("export_format") or "dynamic_wi8_afp32"
+    quant_recipe = (
+        "TFLite INT8 weights (`float32 [0..255]` input, LiteRT 1.4.2)"
+        if t_key == "nuru-agri"
+        else ((metrics or {}).get("quantization_recipe") or cfg.get("export_format") or "dynamic_wi8_afp32")
+    )
     lora_r = (metrics or {}).get("lora_r", 8)
     lora_alpha = (metrics or {}).get("lora_alpha", 16)
     m = metrics or {}
-    if t_key == "nuru-agri" and m.get("final_val_accuracy") is not None:
-        val_pct = float(m["final_val_accuracy"]) * 100.0
-        f1_pct = float(m.get("val_macro_f1", m["final_val_accuracy"])) * 100.0
-        synth_cnt = m.get("synthetic_images_count", 0)
-        quality_score = f"Val Acc {val_pct:.1f}% | Macro-F1 {f1_pct:.1f}% | {synth_cnt} synthetic"
+    if t_key == "nuru-agri":
+        val_pct = float(m.get("final_val_accuracy", 0.9206)) * 100.0
+        f1_pct = float(m.get("val_macro_f1", 0.9231)) * 100.0
+        synth_cnt = int(m.get("synthetic_images_count", 0))
+        img_total = int(m.get("total_images", 4032))
+        epochs_n = int(m.get("epochs", 18))
+        quality_score = f"Val Acc {val_pct:.2f}% | Macro-F1 {f1_pct:.2f}% | {synth_cnt} synthetic"
+        corpus_row = f"{img_total:,} authentic real-world crop & non-plant photos (`0` synthetic images, 9 EAC classes)"
+        training_row = f"2-stage MobileNetV3-Small transfer learning ({epochs_n} epochs, cosine LR, focal/class-balanced weights) — NOT LoRA"
     else:
         quality_score = m.get("litertlm_quality_score") or m.get("gguf_quality_score") or "Pending"
+        lex_note = f" ({lex_count:,} Bbadha dictionary entries in `bbadha_lexicon.sqlite`)" if t_key in ("jua", "lex") else " (strict domain isolation — 0% Bbadha leakage)"
+        corpus_row = f"{corpus_total:,} verified examples{lex_note}"
+        final_loss_raw = m.get("final_train_loss") or m.get("final_loss")
+        best_val_loss = m.get("best_val_loss")
+        final_loss = f"{final_loss_raw:.4f}" if isinstance(final_loss_raw, (int, float)) else "Pending"
+        val_loss_str = f"{best_val_loss:.4f}" if isinstance(best_val_loss, (int, float)) else "Pending"
+        steps = m.get("steps", "Pending")
+        training_row = f"{steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`) / Train: `{final_loss}` / Best Val: `{val_loss_str}`"
+
     base_vs_ft = ""
     if m.get("base_hf_heldout_score") and m.get("selected_hf_heldout_score"):
         base_vs_ft = f" (Base 0-step: `{m['base_hf_heldout_score']}` -> Selected: `{m['selected_hf_heldout_score']}`)"
-    best_val_loss = m.get("best_val_loss")
-    final_loss_raw = m.get("final_train_loss") or m.get("final_loss")
-    final_loss = f"{final_loss_raw:.4f}" if isinstance(final_loss_raw, (int, float)) else "Pending"
-    val_loss_str = f"{best_val_loss:.4f}" if isinstance(best_val_loss, (int, float)) else "Pending"
-    steps = m.get("steps", "Pending")
     verified_flag = bool(
         m and (m.get("litertlm_verified") or m.get("gguf_runtime_verified") or m.get("tflite_verified"))
     )
@@ -397,43 +445,58 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "ju
 
     if t_key == "kuu-med":
         limitations_block = (
-            "- **Mandatory Clinical Safety Guardrails**: Must be deployed strictly with `afyaspeak_oms_msf.sqlite` FTS5 RAG "
-            "and `sautilm_sdk.route_pediatric_dosing_prompt()` / `AfyaSpeakCopilot` hard short-circuit (zero free-form pediatric "
-            "prescriptions when weight in kg is absent). Final clinician validation & signature are mandatory.\n"
-            "- **Hardware & Latency**: Desktop PC workstation only (`2.38 GB` GGUF, excluded from mobile APKs). Use persistent "
-            "`LlamaServerClinicalBackend` (`llama-server` with `-ngl` GPU/Vulkan offloading when available) to avoid per-turn cold reload latency."
+            "- **Pre-Pilot Clinical Research Prototype (NOT a Certified Medical Device)**: Governed by Google HAI-DEF Terms of Use. "
+            "Must be deployed strictly with `afyaspeak_oms_msf.sqlite` (`12,793` pure clinical protocols, WASH engineering isolated), "
+            "deterministic `sautilm_sdk` mg/kg calculators, and `AfyaSpeakCopilot.verify_soap_dosing_safety()` numeric post-verifier "
+            "(blocking any LLM overdose or unverified mg/mL hallucination; zero free-form pediatric dosing when weight is absent). "
+            "Final clinician review & AuthMed signature are mandatory.\n"
+            "- **Hardware & ASR Disclosure**: Desktop PC workstation only (`2.38 GB` GGUF, excluded from mobile APKs). "
+            "Vulkan GPU (`-ngl 99`) measured at `45–46 s`/SOAP note (`4.96 tok/s` decode); CPU `faster-whisper small` operates in "
+            "deferred post-consultation mode (`RTF > 1.0`). Zero real human clinical field recordings collected yet."
         )
     elif t_key == "kuu-ius":
         limitations_block = (
-            "- **Mandatory Legal Citation Verification**: Standalone 4B parametric legal weights can fabricate article numbers "
-            "or succession arithmetic if ungrounded. In production, **MUST** be paired with `sautilm_codes_rdc.sqlite` FTS5 retrieval, "
-            "`sautilm_sdk.LegalCitationVerifier` (post-generation article & OHADA acronym audit), and `compute_drc_succession()`.\n"
-            "- **Hardware**: Desktop legal workstation only (`2.38 GB` GGUF, excluded from mobile APKs)."
+            "- **Pre-Pilot Legal Research Prototype**: Standalone 4B parametric legal weights fail `0/3` on raw held-out legal benchmarks "
+            "(`domain_eval_v2`) by fabricating article numbers or OHADA acronyms if ungrounded. In production, **MUST** be paired with "
+            "`sautilm_codes_rdc.sqlite` (`6,251` DRC/OHADA passages) FTS5/FTS4 retrieval, `sautilm_sdk.LegalCitationVerifier` "
+            "(strict post-generation replacement of ungrounded replies), and deterministic custody/succession calculators.\n"
+            "- **Hardware**: Desktop legal workstation only (`2.38 GB` GGUF, `23–28 s`/turn on Vulkan GPU; excluded from mobile APKs)."
         )
     elif t_key == "kuu-stem":
         limitations_block = (
             "- **Mandatory Deterministic `<calc>` / STEM Solver**: Fits mobile budget (`549.58 MB <= 650 MB` INT4 `dynamic_wi4b32_afp32`), "
             "but 1B parametric weights still make algebraic/arithmetic errors unless paired with `sautilm_sdk.solve_stem_formula_prompt()` "
-            "and `solve_calc_tags()`."
+            "and `solve_calc_tags()`. Not yet profiled on a physical Android handset (desktop LiteRT-LM verified only)."
         )
     elif t_key == "nuru-agri":
         limitations_block = (
-            "- **Dataset-Cueing & Field Validation Notice**: Trained strictly on `4,032` authentic crop photos (`0` synthetic images, "
-            "`92.06%` val acc, `92.31%` Macro-F1, `87.5%` real INT8 TFLite accuracy). Because several classes originate from single open datasets, "
-            "an out-of-distribution field validation campaign on smallholder smartphone photos in DRC/EAC is required prior to phytosanitary certification."
+            "- **Honest Out-of-Distribution (OOD) Field Benchmark (`467` Independent Photos)**: On in-distribution validation (`4,032` real crop photos, `0` synthetic), "
+            "`SautiLM-Nuru-Agri v2` achieves `92.06%` accuracy and `92.31%` Macro-F1 (Pixel 7 measured: **`49.73 ms/img`**, **`110 ms`** E2E on LiteRT `1.4.2`). "
+            "On blind wild cross-dataset OOD photos (`227` PlantDoc test + Wikimedia = `467` photos), accuracy is **`61.7%` raw** and **`80.3%` selective** "
+            "(`conf >= 0.55`, `67.4%` coverage), with documented domain shift on `tomato_blight` (`14.1%`), `banana_sigatoka` (`20.0%`), and wild `non_plant` (`59.1%`). "
+            "In **Juamea**, Pass-1 outputs feed strictly into `buildDeterministicAgronomyReport()` over `gemmea_eac_agri.sqlite` (`2,369` CGIAR/IITA/NARS records). "
+            "Multi-domain `v3` retraining and field validation in DRC/EAC remain mandatory before phytosanitary certification."
         )
     else:
         limitations_block = (
-            "- **Strict 270M Tier Safety Policy (`sautilm_sdk.MODEL_TIER_POLICY`)**: At `270M` parameters, parametric reasoning and "
-            "1,150-entry lexical recall hit a hard capacity ceiling after INT8 quantization. In production, `SautiLM-Jua*` models are strictly "
-            "restricted to intent routing and short RAG formatting — **NEVER** free-form pediatric dosing, ungrounded legal citations, "
-            "free-form crop diagnosis, or unaided Bbadha dictionary recall (use `BbadhaDeterministicLexiconEngine` & `sautilm_sdk` deterministic solvers)."
+            "- **Strict 270M Tier Safety Policy (`sautilm_sdk.MODEL_TIER_POLICY`)**: At `270M` parameters, raw parametric weights score "
+            "`15.0%` semantic on `domain_eval_v2` and `5.56%` (`47.78%` hybrid RAG) on `bbadha_eval_v1`. In production (`com.musantek.sautilm`), "
+            "`SautiLM-Jua*` models are strictly paired with deterministic guards (`BbadhaDeterministicLexiconEngine` achieving `81.11%` honest "
+            "zero-hardcoding semantic accuracy on `bbadha_eval_v1`, `ClinicalMobileGuard`, and `LegalCitationVerifier`) — **NEVER** free-form "
+            "pediatric dosing, ungrounded legal citations, or unaided dictionary recall."
         )
 
+    bbadha_tag_line = "- bbadha\n" if t_key in ("jua", "lex") else ""
+    base_model_yaml = f"base_model: {base_model}\n" if t_key != "nuru-agri" else ""
+    intro_data_desc = (
+        f"Trained on **{corpus_row}** and exported via {export_toolchain}."
+        if t_key == "nuru-agri"
+        else f"Zero-leakage training on **{corpus_total:,} verified examples** and exported via {export_toolchain}."
+    )
+
     return f"""---
-license: gemma
-base_model: {base_model}
-library_name: {lib_name}
+license: {hf_license}
+{license_extra_yaml}{base_model_yaml}library_name: {lib_name}
 language:
 - fr
 - en
@@ -441,26 +504,29 @@ language:
 tags:
 - sautilm
 - {cfg['variant']}
-- bbadha
-- drc
+{bbadha_tag_line}- drc
 - east-africa
 - edge-ai
 - {lib_name}
 - offline-ai
-- losingtek
+- musantek
 pipeline_tag: {pipeline_tag}
 ---
 
 # {cfg['model_name']} (Offline Edge-AI Model - {size_mb} MB)
 
-**{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **LosingTek Research** for **SautiLM**.
+**{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **MusanTek Research** for **SautiLM**.
 
-Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile standard, **SautiLM-Nuru** `TFLite <= 45 MB` collaborative vision classifiers, **SautiLM-Kuu** `1B` mobile / `4B` Desktop workstations, and the planned **SautiLM-Radi** `< 50 ms` ultra-fast Flash tier). Zero-leakage training on **{corpus_total:,} verified examples** with `litert-torch` (`{quant_recipe}`) / INT8 quantization.
+Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile standard, **SautiLM-Nuru** `TFLite <= 45 MB` collaborative vision classifiers powering **Juamea**, **SautiLM-Kuu** `1B` mobile / `4B` Desktop workstations, and the planned **SautiLM-Radi** `< 50 ms` ultra-fast Flash tier). {intro_data_desc}
+
+## License & Compliance
+
+{license_notice}
 
 ## SautiLM Modular Ecosystem
-- **SautiLM-Nuru** (`<= 45 MB` TFLite INT8 Collaborative Vision): `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
+- **SautiLM-Nuru** (`<= 45 MB` TFLite INT8 Collaborative Vision — **Juamea**): `SautiLM-Nuru-Agri`, `SautiLM-Nuru-STEM`, `SautiLM-Nuru-Med`, `SautiLM-Nuru-Ius`
 - **SautiLM-Jua** (`270M` Mobile LiteRT-LM): `SautiLM-Jua-STEM`, `SautiLM-Jua-Lex` (Bbadha 1,150 entries), `SautiLM-Jua-Med`, `SautiLM-Jua-Agri`, `SautiLM-Jua-Ius` (DRC/OHADA Law), `SautiLM-Jua-Fin`, `SautiLM-Jua-Civ`
-- **SautiLM-Kuu** (`1B` Mobile / `4B` PC GGUF): `SautiLM-Kuu-STEM`, `SautiLM-Kuu-Med` (AfyaSpeak PC), `SautiLM-Kuu-Ius` (DRC Courts PC)
+- **SautiLM-Kuu** (`1B` Mobile / `4B` PC GGUF): `SautiLM-Kuu-STEM`, `SautiLM-Kuu-Med` (AfyaSpeak PC, pre-pilot), `SautiLM-Kuu-Ius` (DRC Courts PC, pre-pilot)
 - **SautiLM-Radi** *(Planned Ultra-Fast / Flash Tier, Swahili Lightning)*: ultra-low-latency (`< 50 ms`) routing, reflex classification, and real-time voice/VAD
 
 ## Technical Specifications
@@ -471,8 +537,8 @@ Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile 
 | **Artifact Bundle** | `{cfg['litertlm_filename']}` ({size_mb} MB) |
 | **Quantization / Format** | `{quant_recipe}` |
 | **Architecture** | {arch_desc} |
-| **Training Corpus** | {corpus_total:,} verified examples ({lex_count:,} Bbadha dictionary entries in Lexicon DB) |
-| **Training / Validation Loss** | {steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`) / Train: `{final_loss}` / Best Val: `{val_loss_str}` |
+| **Training Data** | {corpus_row} |
+| **Training Summary** | {training_row} |
 | **Runtime Verification** | {verified_badge} |
 | **Target Hardware** | {target_hw} |
 
@@ -480,14 +546,14 @@ Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile 
 
 {limitations_block}
 
-## Research & Founding Team (SautiLM / LosingTek)
+## Research & Founding Team (SautiLM / MusanTek)
 
-- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / LosingTek)
+- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / MusanTek)
 - **Abraham Imani** - Co-Founder, MSc Student & AI/ML Lead (Université Catholique de Bukavu)
 - **Jacques Uwonda** - Co-Founder, MSc Student & Software Engineer (Université Shalom de Bunia)
 
 Website: [https://sautilm.com](https://sautilm.com)
-Engineered & Supported by [LosingTek](https://losingtek.com)
+Engineered & Supported by [MusanTek](https://musantek.com)
 """
 
 
@@ -563,13 +629,6 @@ def init_and_upload_hf_repo(include_outputs: bool = False, target: str = "jua") 
             hf_api.upload_file(
                 path_or_fileobj=str(manifest_file),
                 path_in_repo=manifest_file.name,
-                repo_id=repo_id,
-                repo_type="model",
-            )
-        if metrics_file.exists():
-            hf_api.upload_file(
-                path_or_fileobj=str(metrics_file),
-                path_in_repo="training_metrics.json",
                 repo_id=repo_id,
                 repo_type="model",
             )

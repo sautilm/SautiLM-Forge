@@ -1,6 +1,6 @@
 # Contributing to SautiLM-Forge
 
-Thank you for your interest in contributing to **SautiLM** and **LosingTek Research**! Our mission is to build sovereign, 100% offline Edge-AI models for marginalized languages, displaced learners, healthcare workers, and legal practitioners across the Democratic Republic of the Congo and East Africa.
+Thank you for your interest in contributing to **SautiLM** and **MusanTek Research**! Our mission is to build sovereign, 100% offline Edge-AI models for marginalized languages, displaced learners, healthcare workers, and legal practitioners across the Democratic Republic of the Congo and East Africa.
 
 ---
 

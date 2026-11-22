@@ -45,7 +45,7 @@ class TestModularForgePipeline(unittest.TestCase):
         self.assertEqual(len(suite), 10)
 
         clean_outputs = {
-            "stem_identity_fr": "Je suis SautiLM-Jua-STEM de LosingTek Research pour l'enseignement secondaire et les examens.",
+            "stem_identity_fr": "Je suis SautiLM-Jua-STEM de MusanTek Research pour l'enseignement secondaire et les examens.",
             "stem_quad_fr": "Discriminant Delta = 144, donc les racines sont x1 = 3 et x2 = -1.",
             "stem_integral_fr": "Une primitive de cos(x) est sin(x) ; l'integrale vaut 1.",
             "stem_qcm_math_fr": "Bonne reponse : B) {3 ; 4} car 3 + 4 = 7 et 3 * 4 = 12.",
@@ -175,14 +175,26 @@ class TestModularForgePipeline(unittest.TestCase):
         self.assertIn("unsloth/gemma-3-1b-it", card_1b)
         self.assertIn("AndaaEdge", card_1b)
         self.assertIn("0.4200", card_1b)
+        self.assertNotIn("\n- bbadha\n", card_1b)
 
         card_4b = build_hf_model_card({"base_model": "unsloth/medgemma-4b-it", "gguf_verified": True}, target="kuu-med")
         self.assertIn("library_name: gguf", card_4b)
+        self.assertIn("license: other", card_4b)
+        self.assertIn("health-ai-developer-foundations", card_4b)
         self.assertIn("AfyaSpeak", card_4b)
+        self.assertNotIn("litert-torch", card_4b)
+        self.assertNotIn("\n- bbadha\n", card_4b)
 
         card_nuru = build_hf_model_card({"size_mb": 3.8}, target="nuru-agri")
         self.assertIn("library_name: tflite", card_nuru)
-        self.assertIn("Gemmea", card_nuru)
+        self.assertIn("license: apache-2.0", card_nuru)
+        self.assertIn("Juamea", card_nuru)
+        self.assertNotIn("litert-torch", card_nuru)
+        self.assertNotIn("LoRA `r=", card_nuru)
+        self.assertNotIn("\n- bbadha\n", card_nuru)
+
+        card_lex = build_hf_model_card({}, target="lex")
+        self.assertIn("\n- bbadha\n", card_lex)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             bad = Path(tmpdir) / "bad.gguf"

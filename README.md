@@ -1,12 +1,12 @@
 # SautiLM-Forge
 
-**SautiLM-Forge** is the official corpus engineering, LoRA fine-tuning, and sub-150 MB mobile Edge-AI packaging pipeline developed by **LosingTek Research** (Bunia, Ituri, Democratic Republic of the Congo).
+**SautiLM-Forge** is the official corpus engineering, LoRA fine-tuning, and sub-150 MB mobile Edge-AI packaging pipeline developed by **MusanTek Research** (Bunia, Ituri, Democratic Republic of the Congo).
 
 It powers the **SautiLM** family of offline mobile language models engineered for low-resource African languages (starting with **Bbadha / Kilendu** and **Congolese Swahili**) and critical community domains in Eastern DRC.
 
 - **Official Website**: [https://sautilm.com](https://sautilm.com)
 - **Hugging Face Model Hub (`SautiLM Jua`)**: [https://huggingface.co/sautilm/SautiLM-Jua](https://huggingface.co/sautilm/SautiLM-Jua)
-- **Organization**: LosingTek Research (Bunia, Ituri, DRC)
+- **Organization**: MusanTek Research (Bunia, Ituri, DRC)
 
 ---
 
@@ -54,7 +54,7 @@ SautiLM-Forge/
 
 > **Data Sovereignty & IP Protection Note**: To protect community linguistic assets and prevent unauthorized scraping, the full 1,150-word Bbadha JSON dictionary and the 35 MB `sautilm_v1_train.jsonl` corpus are excluded from public Git tracking via `.gitignore`. Only `data/sample_train_schema.jsonl` and `data/corpus_stats.json` are versioned publicly.
 >
-> **Android On-Device Deployment Note (`sautilm-jua.litertlm`)**: On Android 11+, `Flutter/sautilm` stores `sautilm-jua.litertlm` inside an invisible private vault (`noBackupFilesDir/sautilm_models/`) exposed read-only to LosingTek / partner apps via `content://com.losingtek.sautilm.modelprovider/models/` (`0 KB` network re-download, Play Store compliant — **Option 1**), while also supporting `/storage/emulated/0/.SautiLM/models/` with `.nomedia` (`MANAGE_EXTERNAL_STORAGE`) for zero-copy field tablet deployments (**Option 2**).
+> **Android On-Device Deployment Note (`sautilm-jua.litertlm`)**: On Android 11+, `Flutter/sautilm` stores `sautilm-jua.litertlm` inside an invisible private vault (`noBackupFilesDir/sautilm_models/`) exposed read-only to MusanTek / partner apps via `content://com.musantek.sautilm.modelprovider/models/` (`0 KB` network re-download, Play Store compliant — **Option 1**), while also supporting `/storage/emulated/0/.SautiLM/models/` with `.nomedia` (`MANAGE_EXTERNAL_STORAGE`) for zero-copy field tablet deployments (**Option 2**).
 
 ---
 
@@ -81,9 +81,9 @@ python src/kaggle_orchestrator.py status
 
 ---
 
-## 4. Founding & Research Team (LosingTek Research)
+## 4. Founding & Research Team (MusanTek Research)
 
-- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / LosingTek)
+- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / MusanTek)
 - **Abraham Imani** - Co-Founder & AI/ML Lead (Université Catholique de Bukavu)
 - **Jacques Uwonda** - Co-Founder & Software Engineer (Université Shalom de Bunia)
 

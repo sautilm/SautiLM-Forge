@@ -5,9 +5,9 @@ from typing import Any, Dict, List
 
 def _make_role_prompts(code: str, title_en: str, title_fr: str, title_sw: str) -> Dict[str, str]:
     return {
-        "en": f"You are {code} (SautiLM-Jua), an offline {title_en} assistant by LosingTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
-        "fr": f"Tu es {code} (SautiLM-Jua), assistant hors-ligne de {title_fr} créé par LosingTek Research. Réponds clairement en français. Pour une simple salutation (ex: Hey, Bonjour), réponds en 1 à 2 phrases.",
-        "sw": f"Wewe ni {code} (SautiLM-Jua), msaidizi wa {title_sw} bila mtandao kutoka LosingTek Research. Jibu kwa Kiswahili fasaha. Kwa salamu fupi, jibu kwa sentensi 1 au 2.",
+        "en": f"You are {code} (SautiLM-Jua), an offline {title_en} assistant by MusanTek Research. Answer accurately in English. For brief greetings (like Hey/Hello), reply warmly in 1-2 sentences.",
+        "fr": f"Tu es {code} (SautiLM-Jua), assistant hors-ligne de {title_fr} créé par MusanTek Research. Réponds clairement en français. Pour une simple salutation (ex: Hey, Bonjour), réponds en 1 à 2 phrases.",
+        "sw": f"Wewe ni {code} (SautiLM-Jua), msaidizi wa {title_sw} bila mtandao kutoka MusanTek Research. Jibu kwa Kiswahili fasaha. Kwa salamu fupi, jibu kwa sentensi 1 au 2.",
     }
 
 
