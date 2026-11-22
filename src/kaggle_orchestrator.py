@@ -307,6 +307,9 @@ def push_gpu_kernel_to_kaggle(dataset_ref: str, target: str = "jua") -> str:
 
     print(f"[SautiLM-Forge] Pushing GPU Kernel to Kaggle: {kernel_ref}")
     res = _with_kaggle_retry(lambda: api.kernels_push(str(push_dir)), "kernels_push")
+    err_msg = getattr(res, "error", None)
+    if err_msg:
+        raise RuntimeError(f"Kaggle kernel push rejected for {kernel_ref}: {err_msg}")
     print(f"[SautiLM-Forge] Kernel push response: {getattr(res, 'url', res)}")
     return kernel_ref
 
