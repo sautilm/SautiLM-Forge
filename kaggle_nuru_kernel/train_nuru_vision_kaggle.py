@@ -110,7 +110,7 @@ def _strict_map_folder(rel_path: str) -> tuple[str | None, str | None]:
 def prepare_nuru_vision_dataset(
     work_dir: Path,
     input_root: Path,
-    max_per_class: int = 450,
+    max_per_class: int = 550,
 ) -> tuple[Path, Dict[str, int], Dict[str, int]]:
     from PIL import Image  # type: ignore
     import tensorflow as tf  # type: ignore
@@ -125,19 +125,22 @@ def prepare_nuru_vision_dataset(
     counts: Dict[str, int] = {lbl: 0 for lbl in NURU_AGRI_LABELS}
     provenance: Dict[str, int] = {}
     sub_bucket_caps = {
-        "healthy_cassava": 95,
-        "healthy_maize": 95,
-        "healthy_maize_faw": 40,
-        "healthy_bean": 95,
+        "healthy_cassava": 100,
+        "healthy_maize": 130,
+        "healthy_maize_faw": 80,
+        "healthy_bean": 100,
         "healthy_banana": 90,
-        "healthy_tomato": 95,
-        "tomato_early": 225,
-        "tomato_late": 225,
-        "non_plant_buildings": 90,
-        "non_plant_street": 90,
-        "non_plant_sea": 90,
-        "non_plant_glacier": 90,
-        "non_plant_mountain": 90,
+        "healthy_tomato": 80,
+        "healthy_plantdoc_field": 120,
+        "maize_rust_plantdoc_field": 110,
+        "tomato_early": 180,
+        "tomato_late": 180,
+        "tomato_blight_plantdoc_field": 190,
+        "non_plant_buildings": 110,
+        "non_plant_street": 110,
+        "non_plant_sea": 110,
+        "non_plant_glacier": 110,
+        "non_plant_mountain": 110,
     }
     sub_bucket_counts: Dict[str, int] = {k: 0 for k in sub_bucket_caps}
 
@@ -160,6 +163,75 @@ def prepare_nuru_vision_dataset(
             return True
         except Exception:
             return False
+
+    # 0. Ingest real in-the-wild field photos from PlantDoc TRAIN split ONLY (NEVER test/!)
+    #    Eliminates PlantVillage studio-background shortcut learning on tomato_blight & healthy_leaf.
+    plantdoc_repo = tmp_root / "plantdoc_repo"
+    try:
+        import io as _io
+        import subprocess as _sp
+
+        if not (plantdoc_repo / ".git").exists():
+            _sp.run(
+                [
+                    "git",
+                    "clone",
+                    "--no-checkout",
+                    "--depth",
+                    "1",
+                    "https://github.com/pratikkayal/PlantDoc-Dataset.git",
+                    str(plantdoc_repo),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        ls_res = _sp.run(
+            ["git", "-C", str(plantdoc_repo), "ls-tree", "-r", "--name-only", "HEAD", "train"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        pd_map = {
+            "Tomato Early blight leaf": ("tomato_blight", "tomato_blight_plantdoc_field"),
+            "Tomato leaf late blight": ("tomato_blight", "tomato_blight_plantdoc_field"),
+            "Corn rust leaf": ("maize_rust", "maize_rust_plantdoc_field"),
+            "Tomato leaf": ("healthy_leaf", "healthy_plantdoc_field"),
+            "Soyabean leaf": ("healthy_leaf", "healthy_plantdoc_field"),
+            "Bell_pepper leaf": ("healthy_leaf", "healthy_plantdoc_field"),
+            "Apple leaf": ("healthy_leaf", "healthy_plantdoc_field"),
+        }
+        pd_paths = [p.strip() for p in ls_res.stdout.splitlines() if p.strip()]
+        rng.shuffle(pd_paths)
+        for git_path in pd_paths:
+            if not git_path.startswith("train/"):
+                raise RuntimeError(f"LEAKAGE GUARD: non-train PlantDoc path encountered: {git_path}")
+            parts = git_path.split("/")
+            if len(parts) < 3 or parts[1] not in pd_map:
+                continue
+            if Path(parts[-1]).suffix.lower() not in candidate_exts:
+                continue
+            t_cls, bkt = pd_map[parts[1]]
+            if counts[t_cls] >= max_per_class or sub_bucket_counts[bkt] >= sub_bucket_caps[bkt]:
+                continue
+            blob = _sp.run(["git", "-C", str(plantdoc_repo), "show", f"HEAD:{git_path}"], capture_output=True)
+            if blob.returncode != 0 or len(blob.stdout) < 1000:
+                continue
+            try:
+                with Image.open(_io.BytesIO(blob.stdout)) as im:
+                    im = im.convert("RGB")
+                    dst = ds_dir / t_cls / f"{t_cls}_{counts[t_cls]:04d}.jpg"
+                    im.save(dst, format="JPEG", quality=92)
+                counts[t_cls] += 1
+                sub_bucket_counts[bkt] += 1
+                prov_k = f"plantdoc_train:{parts[1]}"
+                provenance[prov_k] = provenance.get(prov_k, 0) + 1
+            except Exception:
+                continue
+        print(f"[SautiLM-Nuru-Agri] PlantDoc TRAIN-only field photos ingested: { {k: v for k, v in provenance.items() if k.startswith('plantdoc_train:')} }")
+    except Exception as pd_exc:
+        print(f"[SautiLM-Nuru-Agri] Note: PlantDoc TRAIN fetch skipped ({pd_exc}); continuing with mounted datasets.")
 
     for root, _dirs, files in os.walk(input_root):
         if not files:
@@ -243,6 +315,7 @@ def main() -> None:
         seed=42,
         image_size=(224, 224),
         batch_size=32,
+        label_mode="categorical",
         class_names=list(NURU_AGRI_LABELS),
     )
     val_ds = tf.keras.utils.image_dataset_from_directory(
@@ -252,14 +325,17 @@ def main() -> None:
         seed=42,
         image_size=(224, 224),
         batch_size=32,
+        label_mode="categorical",
         class_names=list(NURU_AGRI_LABELS),
     )
 
     aug = tf.keras.Sequential(
         [
             tf.keras.layers.RandomFlip("horizontal_and_vertical"),
-            tf.keras.layers.RandomRotation(0.12),
-            tf.keras.layers.RandomContrast(0.12),
+            tf.keras.layers.RandomRotation(0.20),
+            tf.keras.layers.RandomZoom(height_factor=(-0.22, 0.22), width_factor=(-0.22, 0.22)),
+            tf.keras.layers.RandomContrast(0.25),
+            tf.keras.layers.RandomBrightness(0.20),
         ]
     )
     train_ds_aug = train_ds.map(
@@ -276,31 +352,33 @@ def main() -> None:
         pooling="avg",
     )
     base.trainable = False
-    head = tf.keras.layers.Dropout(0.30)(base.output)
+    head = tf.keras.layers.Dropout(0.35)(base.output)
     outputs = tf.keras.layers.Dense(len(NURU_AGRI_LABELS), activation="softmax", name="probs")(head)
     model = tf.keras.Model(inputs=inputs, outputs=outputs, name="sautilm_nuru_agri")
+    loss_fn = tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.08)
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=4e-4),
-        loss="sparse_categorical_crossentropy",
+        optimizer=tf.keras.optimizers.Adam(learning_rate=5e-4),
+        loss=loss_fn,
         metrics=["accuracy"],
     )
-    hist = model.fit(train_ds_aug, validation_data=val_ds_pref, epochs=5, verbose=2)
+    hist = model.fit(train_ds_aug, validation_data=val_ds_pref, epochs=6, verbose=2)
 
-    # Gentle fine-tuning of upper MobileNetV3 blocks
+    # Field-robust fine-tuning of upper MobileNetV3 blocks with label smoothing
     base.trainable = True
-    for layer in base.layers[:-30]:
+    for layer in base.layers[:-45]:
         layer.trainable = False
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5),
-        loss="sparse_categorical_crossentropy",
+        optimizer=tf.keras.optimizers.Adam(learning_rate=6e-5),
+        loss=loss_fn,
         metrics=["accuracy"],
     )
     callbacks = [
+        tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6),
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=2, restore_best_weights=True
-        )
+            monitor="val_loss", patience=3, restore_best_weights=True
+        ),
     ]
-    hist_ft = model.fit(train_ds_aug, validation_data=val_ds_pref, epochs=6, callbacks=callbacks, verbose=2)
+    hist_ft = model.fit(train_ds_aug, validation_data=val_ds_pref, epochs=10, callbacks=callbacks, verbose=2)
     val_acc_hist = hist.history.get("val_accuracy", []) + hist_ft.history.get("val_accuracy", [])
 
     # Compute genuine per-class validation accuracy & macro-F1 on held-out 20% split
@@ -309,7 +387,7 @@ def main() -> None:
     rep_images: List[Any] = []
     for batch_imgs, batch_y in val_ds:
         preds = model.predict(batch_imgs, verbose=0)
-        y_true_all.extend(batch_y.numpy().astype(int).tolist())
+        y_true_all.extend(np.argmax(batch_y.numpy(), axis=1).astype(int).tolist())
         y_pred_all.extend(np.argmax(preds, axis=1).astype(int).tolist())
         if len(rep_images) < 48:
             for idx in range(min(6, int(batch_imgs.shape[0]))):
@@ -370,7 +448,7 @@ def main() -> None:
                 itp.set_tensor(in_d["index"], inp)
                 itp.invoke()
                 out_arr = itp.get_tensor(out_d["index"])
-                if int(np.argmax(out_arr[0])) == int(batch_y[idx].numpy()):
+                if int(np.argmax(out_arr[0])) == int(np.argmax(batch_y[idx].numpy())):
                     correct_tflite += 1
                 checked_tflite += 1
 
@@ -391,7 +469,7 @@ def main() -> None:
 
     manifest = {
         "model_name": "SautiLM-Nuru-Agri",
-        "version": "v2-certified-real-datasets",
+        "version": "v3-field-hardened-real-datasets",
         "format": quant_recipe,
         "input_dtype": str(np.dtype(in_info["dtype"]).name),
         "output_dtype": str(np.dtype(out_info["dtype"]).name),
