@@ -740,8 +740,8 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         (
             "stem_abstain_fr",
             stem_sys_fr,
-            "En chimie, donne la masse atomique exacte d'un élément fictif nommé 'Zyrkonium-999' qui n'existe pas au tableau périodique.",
-            lambda t: ("n'existe pas" in t or "fictif" in t or "absent" in t or "inconnu" in t or "pas dans le tableau" in t or "refus" in t or "aucune masse" in t) and "masse atomique exacte de 999" not in t and "mass = 999" not in t,
+            "En chimie, donne la masse atomique exacte de l'élément 'Zyrkonium-999' du tableau périodique.",
+            lambda t: ("n'existe pas" in t or "fictif" in t or "absent" in t or "inconnu" in t or "pas dans le tableau" in t or "refus" in t or "aucune masse" in t or "ne figure pas" in t) and "999 u" not in t and "999 g/mol" not in t and "masse atomique exacte de 999" not in t and "mass = 999" not in t,
         ),
     ]
     if target in ("stem", "kuu-stem"):
@@ -760,11 +760,11 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ("med_identity_fr", med_sys_fr, "Décris brièvement ton rôle d'assistant médical hors ligne et tes limites.", lambda t: ("sautilm-jua-med" in t or "sautilm-kuu-med" in t or "afyaspeak" in t or "losingtek" in t) and "bbadha" not in t),
         ("med_identity_en", med_sys_en, "Summarize your offline clinical assistance role and when you refer patients.", lambda t: ("sautilm" in t or "afyaspeak" in t or "losingtek" in t or "doctor" in t or "clinic" in t) and "bbadha" not in t),
         ("med_amox_unseen", med_sys_fr, "Calcul pédiatrique : enfant de 16 kg sous amoxicilline 50 mg/kg/jour répartie en 2 prises. Quelle dose en mg par prise ?", lambda t: "800" in t and "400" in t and "bbadha" not in t),
-        ("med_artesunate_unseen", med_sys_fr, "Un enfant de 13 kg souffre de paludisme grave (PNLP RDC). Quelle dose d'artésunate IV à 3 mg/kg par injection faut-il calculer (règle < 20 kg) ?", lambda t: "39" in t and ("3,0" in t or "3.0" in t or "3 mg/kg" in t or "3 * 13" in t or "13 * 3" in t) and "bbadha" not in t),
-        ("med_ors_unseen_en", med_sys_en, "A 11 kg dehydrated toddler enters OMS Plan B oral rehydration (75 mL/kg over 4h). Total ORS milliliters required?", lambda t: "825" in t and ("ors" in t or "ml" in t or "rehydration" in t or "zinc" in t) and "bbadha" not in t),
-        ("med_cholera_en", med_sys_en, "Compare the safe cholera chlorine percentages for handwashing (0.05%) versus stool-spill disinfection (0.2% or 0.5%) and explain why they differ.", lambda t: "0.05" in t and ("0.5" in t or "0.2" in t) and "bbadha" not in t),
-        ("med_pph_fr", med_sys_fr, "Dans les 30 minutes après accouchement, l'utérus reste mou (atonie utérine) avec saignement > 500 mL. Quelles 2 actions prioritaires d'urgence (massage utérin et utérotonique) ?", lambda t: ("massage" in t or "utérin" in t) and ("oxytocine" in t or "ocytocine" in t)),
-        ("med_abstain_weight", med_sys_fr, "Calcule immédiatement la dose exacte en mg d'artésunate IV pour un petit garçon dont aucun poids ni âge approximatif n'a été mesuré.", lambda t: ("poids" in t or "peser" in t or "pesée" in t or "manquant" in t or "impossible" in t or "kg" in t) and "100 mg" not in t and "130 mg" not in t),
+        ("med_artesunate_unseen", med_sys_fr, "Un enfant de 13 kg souffre de paludisme grave (PNLP RDC). Quelle dose d'artésunate IV par injection faut-il calculer selon la règle pédiatrique OMS/PNLP (< 20 kg) ?", lambda t: "39" in t and ("3,0" in t or "3.0" in t or "3 mg/kg" in t or "3 * 13" in t or "13 * 3" in t) and "bbadha" not in t),
+        ("med_ors_unseen_en", med_sys_en, "A 11 kg dehydrated toddler enters WHO Plan B oral rehydration (75 mL/kg over 4h). Total ORS milliliters required?", lambda t: "825" in t and ("ors" in t or "ml" in t or "rehydration" in t or "zinc" in t) and "bbadha" not in t),
+        ("med_cholera_en", med_sys_en, "In MSF cholera outbreak protocols, what are the recommended chlorine solution percentages for handwashing versus stool-spill disinfection, and why must they differ?", lambda t: "0.05" in t and ("0.5" in t or "0.2" in t) and "bbadha" not in t),
+        ("med_pph_fr", med_sys_fr, "Dans les 30 minutes après un accouchement, l'utérus reste mou (atonie utérine) avec un saignement supérieur à 500 mL. Quelles sont les 2 actions prioritaires d'urgence selon les protocoles OMS/MSF ?", lambda t: ("massage" in t or "utérin" in t or "uterin" in t) and ("oxytocine" in t or "ocytocine" in t) and "sérum de massage" not in t),
+        ("med_abstain_weight", med_sys_fr, "Calcule immédiatement la dose exacte en mg d'artésunate IV pour un petit garçon dont aucun poids ni âge approximatif n'a été mesuré.", lambda t: ("poids" in t or "peser" in t or "pesée" in t or "manquant" in t or "impossible" in t or "kg" in t) and not re.search(r"\b\d{2,4}\s*mg(?:\s*/\s*kg)?\b", t)),
     ]
     if target in ("med", "kuu-med"):
         return med_suite
@@ -780,11 +780,11 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ("agri_identity_fr", agri_sys_fr, "Présente brièvement ton rôle d'assistant agronome hors ligne pour la RDC et l'Afrique de l'Est.", lambda t: ("sautilm" in t or "gemmea" in t or "losingtek" in t) and "bbadha" not in t),
         ("agri_identity_en", agri_sys_en, "Briefly state your offline agronomy assistant role across DRC and East Africa.", lambda t: ("sautilm" in t or "gemmea" in t or "losingtek" in t) and "bbadha" not in t),
         ("agri_plot_unseen", agri_sys_fr, "Calcule le nombre de boutures saines de manioc à 1 m x 1 m nécessaires pour une parcelle rectangulaire de 35 m sur 20 m.", lambda t: "700" in t and "bbadha" not in t),
-        ("agri_kenya_calendar", agri_sys_fr, "Au Kenya (KALRO), quelles sont les deux principales saisons des pluies (Long Rains mars-mai et Short Rains octobre-décembre) pour planifier les semis ?", lambda t: ("long rains" in t or "mars" in t) and ("short rains" in t or "octobre" in t or "kalro" in t)),
-        ("agri_bxw_unseen", agri_sys_fr, "Un champ de bananiers perd ses feuilles par jaunissement soudain et un exsudat bactérien jaune sort du pseudo-tronc tranché (BXW / Xanthomonas). Quelle maladie suspecter et comment désinfecter la machette ?", lambda t: ("bxw" in t or "xanthomonas" in t or "flétrissement" in t) and ("machette" in t or "outil" in t or "feu" in t or "javel" in t or "flamme" in t)),
-        ("agri_faw_pushpull", agri_sys_fr, "Explique le principe écologique Push-Pull associant Desmodium (répulsif) et Brachiaria (plante piège) sur maïs.", lambda t: "desmodium" in t and ("brachiaria" in t or "striga" in t or "piège" in t)),
-        ("agri_pics_en", agri_sys_en, "Before sealing maize grain inside triple-layer PICS bags, below what safe moisture percentage (12% to 13%) must grain be dried to halt mold and weevils?", lambda t: ("13" in t or "12" in t) and "pics" in t and "100% moisture" not in t),
-        ("agri_abstain_nonleaf", agri_sys_fr, "[TRIAGE VISUEL: IS_LEAF=non, objet='sandale en plastique bleue'] Identifie la maladie foliaire sur cette photo.", lambda t: ("pas" in t or "non" in t or "reprendre" in t or "aucun" in t) and ("feuille" in t or "plante" in t or "végétal" in t) and "mosaïque du manioc" not in t and "rouille du maïs" not in t),
+        ("agri_kenya_calendar", agri_sys_fr, "Au Kenya (calendrier KALRO), quels sont les noms et périodes approximatives des deux principales saisons des pluies pour planifier les semis ?", lambda t: ("long rains" in t or "mars" in t) and ("short rains" in t or "octobre" in t)),
+        ("agri_bxw_unseen", agri_sys_fr, "Un champ de bananiers en Afrique de l'Est présente un jaunissement rapide des feuilles et un exsudat bactérien jaune coule du pseudo-tronc tranché. Quelle maladie suspecter et comment désinfecter les outils de coupe ?", lambda t: ("bxw" in t or "xanthomonas" in t or "flétrissement" in t or "fletrissement" in t) and ("machette" in t or "outil" in t or "feu" in t or "javel" in t or "flamme" in t) and "maladie de la peau" not in t and "dermocid" not in t),
+        ("agri_faw_pushpull", agri_sys_fr, "En agronomie d'Afrique de l'Est, explique le principe écologique Push-Pull sur maïs : quelles deux plantes compagnes sont associées et quel est le rôle respectif de chacune contre les ravageurs ?", lambda t: "desmodium" in t and ("brachiaria" in t or "napier" in t or "striga" in t) and ("répulsif" in t or "repulsif" in t or "piège" in t or "piege" in t) and "gaz à effet de serre" not in t and "consommation d'énergie" not in t),
+        ("agri_pics_en", agri_sys_en, "Before sealing harvested maize grain inside hermetic triple-layer PICS bags, below what safe moisture percentage must the grain be dried to prevent mold, aflatoxins, and weevils?", lambda t: ("13" in t or "12" in t) and "pics" in t and "100% moisture" not in t),
+        ("agri_abstain_nonleaf", agri_sys_fr, "[TRIAGE VISUEL: IS_LEAF=non, objet='sandale en plastique bleue'] Identifie la maladie foliaire sur cette photo.", lambda t: ("pas" in t or "non" in t or "reprendre" in t or "aucun" in t) and ("feuille" in t or "plante" in t or "végétal" in t or "vegetal" in t) and "mosaïque du manioc" not in t and "rouille du maïs" not in t),
     ]
     if target == "agri":
         return agri_suite
@@ -798,14 +798,14 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         f"You are {ius_name}, an offline DRC and OHADA legal assistant created by LosingTek Research. Never fabricate nonexistent articles."
     )
     ius_suite = [
-        ("ius_identity_fr", ius_sys_fr, "Présente ton domaine juridique hors ligne et ton engagement de fidélité documentaire.", lambda t: ("sautilm-jua-ius" in t or "sautilm-kuu-ius" in t or "losingtek" in t) and "bbadha" not in t),
-        ("ius_identity_en", ius_sys_en, "Briefly describe your DRC/OHADA legal assistant role.", lambda t: ("sautilm" in t or "losingtek" in t or "ohada" in t) and "bbadha" not in t),
-        ("ius_garde_unseen", ius_sys_fr, "Selon l'Article 18 de la Constitution de la RDC (limite maximale de garde à vue de 48 heures), un citoyen maintenu 60 heures au commissariat sans présentation au Parquet subit quelle violation ?", lambda t: ("48" in t or "18" in t) and ("arbitraire" in t or "illégale" in t or "dépassement" in t or "parquet" in t or "violation" in t)),
-        ("ius_marriage_en", ius_sys_en, "Under DRC revised Family Code (Law 16/008, minimum legal marriage age 18 years), is a civil marriage valid if one spouse is aged 17?", lambda t: ("18" in t) and ("no" in t or "not valid" in t or "invalid" in t or "illegal" in t or "cannot" in t)),
-        ("ius_succession_unseen", ius_sys_fr, "Actif successoral net de 16000 USD laissé à 3 enfants en RDC (1ère catégorie = 3/4 de la succession) et une veuve (protégée par l'usufruit du logement familial). Quel montant revient au groupe des enfants et quel droit protège la veuve ?", lambda t: ("12000" in t or "12 000" in t or "12,000" in t) and "usufruit" in t),
-        ("ius_ohada_sarl", ius_sys_fr, "Un commerçant de Bunia veut créer une SARL immatriculée au RCCM sous l'OHADA. Quel Acte uniforme (AUSCGIE) régit les sociétés commerciales ?", lambda t: "auscgie" in t and "ausca" not in t and "non aux sarl" not in t and "pas aux sarl" not in t and "pas applicable aux sarl" not in t),
-        ("ius_cdd_unseen", ius_sys_fr, "En droit du travail congolais (Article 40 Code du Travail : plafond de 2 ans / renouvellement CDD), un salarié maintenu 30 mois sous 3 CDD successifs sur un poste permanent bénéficie de quelle requalification (CDI) ?", lambda t: "cdi" in t and ("2 ans" in t or "40" in t or "30 mois" in t or "indéterminée" in t)),
-        ("ius_abstain_fake_art", ius_sys_fr, "Cite mot pour mot les sanctions de l'Article 874 fictif du Code pénal congolais régissant les satellites privés (si cet article n'existe pas dans le corpus, refuse de l'inventer).", lambda t: ("n'existe pas" in t or "ne dispose pas" in t or "absent" in t or "refus" in t or "fictif" in t or "pas" in t) and "servitude pénale de 20 ans" not in t),
+        ("ius_identity_fr", ius_sys_fr, "Présente ton domaine juridique hors ligne et ton engagement de fidélité documentaire.", lambda t: ("sautilm-jua-ius" in t or "sautilm-kuu-ius" in t or "losingtek" in t) and "bbadha" not in t and "accords internationaux" not in t),
+        ("ius_identity_en", ius_sys_en, "Briefly describe your DRC/OHADA legal assistant role.", lambda t: ("sautilm" in t or "losingtek" in t or "ohada" in t) and "bbadha" not in t and "consumer protection" not in t),
+        ("ius_garde_unseen", ius_sys_fr, "Selon la Constitution de la RDC, quelle est la durée maximale légale de la garde à vue et quelle violation subit un citoyen maintenu 60 heures au commissariat sans présentation devant l'autorité judiciaire ?", lambda t: "48" in t and "18" in t and ("arbitraire" in t or "illégale" in t or "illegale" in t or "dépassement" in t or "depassement" in t or "violation" in t) and "article 27" not in t and "article 13" not in t),
+        ("ius_marriage_en", ius_sys_en, "Under the DRC revised Family Code (Law 16/008), is a civil marriage legally valid if one spouse is aged 17? Explain briefly.", lambda t: "18" in t and ("no" in t or "not valid" in t or "invalid" in t or "illegal" in t or "null" in t or "cannot" in t) and "article 37" not in t),
+        ("ius_succession_unseen", ius_sys_fr, "En droit successoral congolais (Code de la Famille), un actif successoral net de 16 000 USD est laissé à 3 enfants (1ère catégorie) et une veuve. Quel montant total revient au groupe des enfants, combien reçoit chaque enfant, et quel droit protège la veuve sur la maison conjugale ?", lambda t: ("12000" in t or "12 000" in t or "12,000" in t) and ("4000" in t or "4 000" in t or "4,000" in t) and "usufruit" in t and "12 000 usd chacun" not in t and "12000 usd chacun" not in t),
+        ("ius_ohada_sarl", ius_sys_fr, "Un commerçant de Bunia veut créer une SARL immatriculée au RCCM sous le droit OHADA. Quel Acte uniforme OHADA régit les sociétés commerciales et le GIE ?", lambda t: "auscgie" in t and "ausca" not in t and "1991" not in t and "non aux sarl" not in t and "pas aux sarl" not in t and "pas applicable aux sarl" not in t),
+        ("ius_cdd_unseen", ius_sys_fr, "En droit du travail congolais, quelle est la durée maximale d'un CDD et de quelle requalification bénéficie un salarié maintenu 30 mois sous 3 CDD successifs sur un poste permanent ?", lambda t: ("cdi" in t or "durée indéterminée" in t or "duree indeterminee" in t) and ("2 ans" in t or "deux ans" in t or "40" in t) and "cour du travail" not in t),
+        ("ius_abstain_fake_art", ius_sys_fr, "Cite mot pour mot les sanctions prévues par l'Article 874 du Code pénal congolais régissant les satellites privés en orbite basse.", lambda t: ("n'existe pas" in t or "ne dispose pas" in t or "absent" in t or "refus" in t or "fictif" in t or "introuvable" in t or "ne figure pas" in t or "aucun article" in t) and "servitude pénale de 20 ans" not in t),
     ]
     if target in ("ius", "kuu-ius"):
         return ius_suite
@@ -818,30 +818,29 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         "You are SautiLM-Jua-Lex, an offline Bbadha (Kilendu, spoken in Ituri, DRC), Kiswahili, French, and English lexical assistant by LosingTek Research."
     )
     lex_suite = [
-        ("lex_identity", lex_sys_fr, "Présente brièvement ton rôle lexicographique pour la langue Bbadha (Kilendu) en Ituri.", lambda t: ("sautilm" in t or "bbadha" in t or "ituri" in t)),
+        ("lex_identity", lex_sys_fr, "Présente brièvement ton rôle lexicographique pour la langue Bbadha (Kilendu) en Ituri.", lambda t: ("sautilm" in t or "bbadha" in t or "ituri" in t) and "tentu, saya" not in t and "ahli dalam" not in t),
         ("lex_ago_fr", "Tu es SautiLM-Jua-Lex. Dictionnaire Bbadha vérifié : Mot: ágó | Kiswahili: mwituni | Français: dans la forêt.", "Comment dit-on 'dans la forêt' en Bbadha (Kilendu) et en Kiswahili selon cet extrait ?", lambda t: ("ágó" in t or "ago" in t) and ("mwituni" in t or "forêt" in t or "foret" in t)),
         ("lex_abba_en", "You are SautiLM-Jua-Lex. Verified Bbadha dictionary: Word: 'ábba | Kiswahili: mjini | English: in the village.", "What does the Bbadha word \"'ábba\" mean in Kiswahili and English?", lambda t: ("village" in t or "mjini" in t)),
-        ("lex_waku_fr", "Tu es SautiLM-Jua-Lex. Dictionnaire Bbadha vérifié : Mot: wakú | Kiswahili: ukanda cha mlezi wa mtoto | Français: bandoulière d'enfant ; berceau.", "Quelle est la traduction de \"wakú\" (w.json) en Français et Kiswahili ?", lambda t: ("berceau" in t or "bandoulière" in t or "ukanda" in t or "mtoto" in t)),
+        ("lex_waku_fr", "Tu es SautiLM-Jua-Lex. Dictionnaire Bbadha vérifié : Mot: wakú | Kiswahili: ukanda cha mlezi wa mtoto | Français: bandoulière d'enfant ; berceau.", "Quelle est la traduction du mot Bbadha \"wakú\" en Français et en Kiswahili ?", lambda t: ("berceau" in t or "bandoulière" in t or "ukanda" in t or "mtoto" in t)),
         ("lex_rag_bbu", "Tu es SautiLM-Jua-Lex. Réponds uniquement d'après cet extrait vérifié : Mot: bbù | Kiswahili: tundu ; kisima | Français: trou ; un puits.", "Quels sont les sens du mot Bbadha \"bbù\" dans cet extrait ?", lambda t: ("trou" in t or "puits" in t or "kisima" in t)),
         ("lex_rag_dda", "Tu es SautiLM-Jua-Lex. Réponds uniquement d'après cet extrait vérifié : Mot: ddà | Kiswahili: kuwa refu ; maji | Français: être long, loin ; l'eau, la rivière.", "Donne les deux sens principaux de \"ddà\" selon cet extrait.", lambda t: ("eau" in t or "rivière" in t or "maji" in t) and ("long" in t or "loin" in t)),
         ("lex_phonetics", lex_sys_fr, "Pourquoi l'orthographe Bbadha (langue tonale d'Ituri) utilise-t-elle des accents tonals et des consonnes implosives doubles comme dd vs d ?", lambda t: ("ton" in t or "tons" in t or "tonal" in t) and ("implosive" in t or "sens" in t)),
-        ("lex_abstain_fake", "Tu es SautiLM-Jua-Lex. Extrait SQLite : aucun résultat trouvé dans le dictionnaire Bbadha.", "Traduis le mot Bbadha inventé 'qxztà' sans l'inventer.", lambda t: ("pas" in t or "absent" in t or "aucun" in t or "refus" in t or "dictionnaire" in t) and "soleil" not in t),
+        ("lex_abstain_fake", "Tu es SautiLM-Jua-Lex. Extrait SQLite : aucun résultat trouvé dans le dictionnaire Bbadha.", "Traduis le mot Bbadha 'qxztà' d'après l'extrait SQLite.", lambda t: ("pas" in t or "absent" in t or "aucun" in t or "refus" in t or "dictionnaire" in t) and "soleil" not in t and "arabie" not in t),
     ]
     if target == "lex":
         return lex_suite
 
     jua_sys_fr = (
-        "Tu es SautiLM-Jua, modèle fondation hors-ligne de SautiLM créé à Bunia (Ituri, RDC) par LosingTek Research "
-        "(Georges Byona, Abraham Imani, Jacques Uwonda). Réponds avec rigueur et précision."
+        "Tu es SautiLM-Jua, modèle fondation hors-ligne de SautiLM créé à Bunia (Ituri, RDC) par LosingTek Research. "
+        "Réponds avec rigueur et précision."
     )
     jua_sys_en = (
-        "You are SautiLM-Jua, an offline Edge-AI foundation model created in Bunia (Ituri, DRC) by LosingTek Research "
-        "(Georges Byona, Abraham Imani, Jacques Uwonda)."
+        "You are SautiLM-Jua, an offline Edge-AI foundation model created in Bunia (Ituri, DRC) by LosingTek Research."
     )
     full_jua_suite = [
         ("identity_fr", jua_sys_fr, "Présente qui a conçu la série SautiLM-Jua et sa mission hors ligne.", lambda t: "sautilm-jua" in t and "losingtek" in t and "sautilm-lex" not in t and "core" not in t),
         ("identity_en", jua_sys_en, "Summarize who built SautiLM-Jua and verify you are distinct from ChatGPT.", lambda t: "sautilm-jua" in t and "losingtek" in t and "core" not in t),
-        ("identity_georges", jua_sys_fr, "Qui dirige la recherche SautiLM chez LosingTek Research (Georges Byona, Abraham Imani, Jacques Uwonda) ?", lambda t: ("georges byona" in t or "jacques uwonda" in t) and "losingtek" in t),
+        ("identity_georges", jua_sys_fr, "Qui compose l'équipe fondatrice et de recherche de SautiLM chez LosingTek Research ?", lambda t: ("georges byona" in t or "jacques uwonda" in t or "abraham imani" in t) and "losingtek" in t),
         (
             "greeting_fin_hey",
             "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by LosingTek Research. Answer accurately in English.",
@@ -862,8 +861,8 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ),
         (
             "civ_birth_en",
-            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant by LosingTek Research (DRC Family Code Art. 116: birth registration within 90 days).",
-            "Within how many days after birth must parents register a newborn at the DRC civil status office?",
+            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant for DRC created by LosingTek Research.",
+            "Under the DRC Family Code, within how many days after birth must parents register a newborn at the civil status office?",
             lambda t: "90" in t and ("civil status" in t or "family code" in t or "état civil" in t or "days" in t or "jours" in t),
         ),
         agri_suite[2],  # agri_plot_unseen
@@ -1060,18 +1059,35 @@ def run_hf_heldout_eval(
 
 
 def _strip_llama_cli_banner(raw_output: str, user_prompt: str = "") -> str:
-    """Strips llama-cli interactive banner, spinner, echoed prompt, and trailing timing stats."""
+    """Strips llama-cli interactive banner, ASCII logo, spinner, echoed prompt, and trailing timing stats."""
     text = (raw_output or "").replace("\r", "")
-    # Remove backspace spinner animations
+    # Remove backspace spinner animations & Loading model lines
     while "\x08" in text:
         text = re.sub(r".?\x08", "", text)
+    text = re.sub(r"Loading model\.\.\.[^\n]*\n?", "", text)
+    # Strip llama.cpp ASCII block banner & build/model metadata header
+    lines = text.splitlines()
+    cleaned_lines: List[str] = []
+    in_header = True
+    for ln in lines:
+        s = ln.strip()
+        if in_header:
+            if (
+                not s
+                or any(ch in s for ch in ("▄", "█", "▀"))
+                or re.match(r"^(?:build|model|modalities|available commands|/exit|/regen|/clear|/read)\b", s, re.I)
+            ):
+                continue
+            in_header = False
+        cleaned_lines.append(ln)
+    text = "\n".join(cleaned_lines)
+
     if user_prompt:
         marker = f"> {user_prompt}"
         idx = text.find(marker)
         if idx >= 0:
             text = text[idx + len(marker) :]
         else:
-            # Partial match on first 36 chars of prompt if wrapped
             short = user_prompt[:36].strip()
             idx2 = text.find(f"> {short}")
             if idx2 >= 0:
@@ -1079,6 +1095,7 @@ def _strip_llama_cli_banner(raw_output: str, user_prompt: str = "") -> str:
                 nl = after.find("\n")
                 text = after[nl + 1 :] if nl >= 0 else ""
     text = re.sub(r"\[\s*Prompt:.*?t/s\s*\][\s\S]*$", "", text)
+    text = re.sub(r"\n>\s*$", "", text)
     if "<end_of_turn>" in text:
         text = text.split("<end_of_turn>", 1)[0]
     return text.strip()
@@ -1677,11 +1694,6 @@ def main():
             epoch_val_loss = compute_eval_loss(
                 model, val_encoded, tokenizer.pad_token_id, device, batch_size=batch_size
             )
-            epoch_hf_score = 0
-            if device_str == "cuda":
-                epoch_hf_score, _, _ = run_hf_heldout_eval(
-                    model, tokenizer, target=target_key, device=device, max_new_tokens=260
-                )
             mean_ep_train = (sum(epoch_step_losses) / len(epoch_step_losses)) if epoch_step_losses else 9.9
             val_loss_history.append(
                 {
@@ -1689,22 +1701,16 @@ def main():
                     "step": step,
                     "val_loss": epoch_val_loss,
                     "mean_train_loss": round(mean_ep_train, 4),
-                    "hf_heldout_score": f"{epoch_hf_score}/{base_hf_total}",
                 }
             )
             print(
-                f"[SautiLM-Forge] Epoch {epoch + 1} Held-Out ValLoss: {epoch_val_loss:.4f} "
-                f"| MeanTrainLoss: {mean_ep_train:.4f} | HeldOutScore: {epoch_hf_score}/{base_hf_total}"
+                f"[SautiLM-Forge] Epoch {epoch + 1} Disjoint ValLoss: {epoch_val_loss:.4f} "
+                f"| MeanTrainLoss: {mean_ep_train:.4f} (blind held-out suite untouched during training)"
             )
-            # Prioritize Held-Out Accuracy FIRST, breaking ties by lower validation loss
-            is_better = (
-                best_lora_state is None
-                or epoch_hf_score > best_epoch_hf_score
-                or (epoch_hf_score == best_epoch_hf_score and (best_val_loss is None or epoch_val_loss < best_val_loss))
-            )
+            # Strict ML hygiene: select best checkpoint ONLY on disjoint validation loss (zero test-set peeking)
+            is_better = best_lora_state is None or best_val_loss is None or epoch_val_loss < best_val_loss
             if is_better:
                 best_val_loss = epoch_val_loss
-                best_epoch_hf_score = epoch_hf_score
                 best_lora_state = {
                     k: v.detach().cpu().clone()
                     for k, v in model.state_dict().items()
@@ -1716,64 +1722,68 @@ def main():
                 if no_improve_evals >= patience:
                     early_stopped = True
                     print(f"[SautiLM-Forge] Early stopping triggered at epoch {epoch + 1}")
-            # Memorization ceiling guard: stop early only when train loss collapses (<0.90)
-            # OR when held-out achieves perfection (100% and >= Base 0-step score).
-            if mean_ep_train < 0.90 or (epoch_hf_score >= base_hf_total and epoch_hf_score >= base_hf_score):
+            # Memorization ceiling guard: stop early strictly from train/val loss dynamics (never test score)
+            if mean_ep_train < 0.90:
                 early_stopped = True
                 print(
                     f"[SautiLM-Forge] Memorization guard stopped at epoch {epoch + 1} "
-                    f"(mean_train_loss={mean_ep_train:.4f}, score={epoch_hf_score}/{base_hf_total})"
+                    f"(mean_train_loss={mean_ep_train:.4f}, val_loss={epoch_val_loss:.4f})"
                 )
 
     if best_lora_state:
         missing, unexpected = model.load_state_dict(best_lora_state, strict=False)
         print(
-            f"[SautiLM-Forge] Restored best LoRA checkpoint (best_val_loss={best_val_loss:.4f}, "
-            f"best_epoch_hf_score={best_epoch_hf_score}/{base_hf_total}, unexpected={len(unexpected)})"
+            f"[SautiLM-Forge] Restored best LoRA checkpoint by disjoint val_loss={best_val_loss:.4f} "
+            f"(unexpected={len(unexpected)})"
         )
 
-    # Mandatory Zero-Regression A/B Gate: Base (0-step) vs Fine-Tuned vs Damped (0.75x, 0.5x, 0.25x, 0.0x)
-    ft_hf_score: int = max(0, best_epoch_hf_score)
-    selected_hf_score: int = ft_hf_score
+    # Zero-Leakage Validation Gate: select damped LoRA scale strictly by disjoint `val_loss`
+    # (NEVER by peeking at `_runtime_suite_for_target`, which stays 100% blind final test).
     selected_lora_scale: float = 1.0
-    if device_str == "cuda":
-        if best_epoch_hf_score < 0:
-            ft_hf_score, _, _ = run_hf_heldout_eval(
-                model, tokenizer, target=target_key, device=device, max_new_tokens=260
-            )
-            selected_hf_score = ft_hf_score
-        print(
-            f"[SautiLM-Forge] Base-vs-FT Gate ({target_key}): "
-            f"Base={base_hf_score}/{base_hf_total} | FineTuned(1.0x)={ft_hf_score}/{base_hf_total}"
+    if best_lora_state and val_encoded:
+        best_scale = 1.0
+        best_scale_val_loss = (
+            best_val_loss
+            if best_val_loss is not None
+            else compute_eval_loss(model, val_encoded, tokenizer.pad_token_id, device, batch_size=batch_size)
         )
-        if best_lora_state and (ft_hf_score < base_hf_score or ft_hf_score < base_hf_total):
-            best_scale = 1.0
-            best_score_so_far = ft_hf_score
-            probe_scales = (0.75, 0.5, 0.25, 0.0) if ft_hf_score < base_hf_score else (0.75, 0.5)
-            for scale in probe_scales:
-                scaled_state = {
-                    k: (v * scale if "lora_B" in k else v.clone())
-                    for k, v in best_lora_state.items()
-                }
-                model.load_state_dict(scaled_state, strict=False)
-                sc_score, _, _ = run_hf_heldout_eval(
-                    model, tokenizer, target=target_key, device=device, max_new_tokens=260
-                )
-                print(f"[SautiLM-Forge] Damped LoRA scale={scale} -> Held-Out Score={sc_score}/{base_hf_total}")
-                if sc_score > best_score_so_far:
-                    best_score_so_far = sc_score
-                    best_scale = scale
-            selected_lora_scale = best_scale
-            selected_hf_score = best_score_so_far
-            final_scaled_state = {
-                k: (v * selected_lora_scale if "lora_B" in k else v.clone())
+        for scale in (0.75, 0.5, 0.25, 0.0):
+            scaled_state = {
+                k: (v * scale if "lora_B" in k else v.clone())
                 for k, v in best_lora_state.items()
             }
-            model.load_state_dict(final_scaled_state, strict=False)
-            print(
-                f"[SautiLM-Forge] Gate selected scale={selected_lora_scale} "
-                f"(score={selected_hf_score}/{base_hf_total} vs base={base_hf_score}/{base_hf_total})"
+            model.load_state_dict(scaled_state, strict=False)
+            sc_val_loss = compute_eval_loss(
+                model, val_encoded, tokenizer.pad_token_id, device, batch_size=batch_size
             )
+            print(f"[SautiLM-Forge] Disjoint ValLoss probe scale={scale} -> val_loss={sc_val_loss:.4f}")
+            if sc_val_loss < best_scale_val_loss:
+                best_scale_val_loss = sc_val_loss
+                best_scale = scale
+        selected_lora_scale = best_scale
+        best_val_loss = best_scale_val_loss
+        final_scaled_state = {
+            k: (v * selected_lora_scale if "lora_B" in k else v.clone())
+            for k, v in best_lora_state.items()
+        }
+        model.load_state_dict(final_scaled_state, strict=False)
+        print(
+            f"[SautiLM-Forge] Validation-only Gate selected scale={selected_lora_scale} "
+            f"(best_val_loss={best_val_loss:.4f} vs base_val_loss={base_val_loss})"
+        )
+
+    # Final ONE-SHOT evaluation on the strictly blind, untouched held-out suite
+    ft_hf_score: int = 0
+    selected_hf_score: int = 0
+    if device_str == "cuda":
+        selected_hf_score, _, _ = run_hf_heldout_eval(
+            model, tokenizer, target=target_key, device=device, max_new_tokens=260
+        )
+        ft_hf_score = selected_hf_score
+        print(
+            f"[SautiLM-Forge] Final Blind Held-Out Eval ({target_key}): "
+            f"Base={base_hf_score}/{base_hf_total} | Selected(scale={selected_lora_scale})={selected_hf_score}/{base_hf_total}"
+        )
 
     print("=== [SautiLM-Forge] Step 4: Merging LoRA Adapter & Saving HF Checkpoint ===")
     adapter_dir = work_dir / variant_cfg["adapter_dirname"]

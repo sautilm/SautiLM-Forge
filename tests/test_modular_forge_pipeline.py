@@ -228,6 +228,55 @@ class TestModularForgePipeline(unittest.TestCase):
         self.assertEqual(_strict_map_folder("intel-image-classification/seg_train/seg_train/buildings"), ("non_plant", "non_plant_buildings"))
         self.assertEqual(_strict_map_folder("intel-image-classification/seg_train/seg_train/forest"), (None, None))
 
+    def test_blind_heldout_prompts_have_zero_parenthetical_answer_leakage_and_strict_predicates(self) -> None:
+        from kaggle_kernel.train_and_export import _runtime_suite_for_target, _score_runtime_outputs, _strip_llama_cli_banner
+
+        # Verify ZERO parenthetical answer hints remain in held-out prompts across all targets
+        leaked_hints = [
+            "(0.05%)",
+            "(0.2% or 0.5%)",
+            "(massage utérin et utérotonique)",
+            "(long rains mars-mai",
+            "(bxw / xanthomonas)",
+            "(12% to 13%)",
+            "(limite maximale de garde à vue de 48 heures)",
+            "minimum legal marriage age 18 years",
+            "(protégée par l'usufruit du logement familial)",
+            "(auscgie)",
+            "requalification (cdi)",
+            "(w.json)",
+        ]
+        for tgt in ("stem", "med", "agri", "ius", "lex", "jua"):
+            for key, sys_p, user_p, _ in _runtime_suite_for_target(tgt):
+                blob = f"{sys_p or ''} {user_p}".lower()
+                for hint in leaked_hints:
+                    self.assertNotIn(hint, blob, f"Prompt-hint leakage '{hint}' found in {tgt}:{key}")
+
+        # Strict legal predicates must REJECT Audit v4 4B hallucinations (Art. 27/13, Art. 37, AUSCA, 12 000 USD chacun)
+        hallucinated_ius = {
+            "ius_identity_fr": "Je suis SautiLM-Kuu-Ius, expert OHADA (Harmonisation des Lois sur les Accords Internationaux en matière de Commerce).",
+            "ius_identity_en": "I am SautiLM-Kuu-Ius covering Uniform Acts (Consumer Protection) and OHADA.",
+            "ius_garde_unseen": "Selon l'Article 18 (48 heures), violation arbitraire de l'Article 27 et de l'Article 13 de la Constitution.",
+            "ius_marriage_en": "No, not valid under 18 years per Article 37(1) of the Family Code.",
+            "ius_succession_unseen": "Part des enfants : 12 000 USD. Cela signifie 12 000 USD chacun et 4 000 USD veuve avec usufruit.",
+            "ius_ohada_sarl": "L'Acte uniforme AUSCA de 1991 régit la SARL même si AUSCGIE existe.",
+            "ius_cdd_unseen": "Plafond de 2 ans (Art. 40), requalification en CDI par la Cour du Travail congolaise.",
+            "ius_abstain_fake_art": "L'article 874 n'existe pas dans le corpus vérifié.",
+        }
+        s_ius, total_ius = _score_runtime_outputs(hallucinated_ius, target="kuu-ius")
+        self.assertEqual(total_ius, 8)
+        self.assertEqual(s_ius, 1)  # Only ius_abstain_fake_art should pass!
+
+        # Banner stripper must remove llama.cpp ASCII spinner/logo cleanly
+        noisy = (
+            "Loading model... |\x08-\x08\\\x08 \n\n"
+            "▄▄ ▄▄\n██ ██\n\nbuild : b12628\nmodel : sautilm-kuu-med\n\n"
+            "La dose exacte d'artésunate IV pour 13 kg est 39 mg (3 mg/kg).\n"
+            "[ Prompt: 12.1 t/s | Generation: 4.5 t/s ]\n"
+        )
+        cleaned = _strip_llama_cli_banner(noisy)
+        self.assertEqual(cleaned, "La dose exacte d'artésunate IV pour 13 kg est 39 mg (3 mg/kg).")
+
 
 if __name__ == "__main__":
     unittest.main()

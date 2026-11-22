@@ -392,6 +392,41 @@ def build_hf_model_card(metrics: Dict[str, Any] | None = None, target: str = "ju
         else (f"Header Verified Only ({quality_score})" if m.get("gguf_verified") else "Pending Runtime Verification")
     )
 
+    if t_key == "kuu-med":
+        limitations_block = (
+            "- **Mandatory Clinical Safety Guardrails**: Must be deployed strictly with `afyaspeak_oms_msf.sqlite` FTS5 RAG "
+            "and `sautilm_sdk.route_pediatric_dosing_prompt()` / `AfyaSpeakCopilot` hard short-circuit (zero free-form pediatric "
+            "prescriptions when weight in kg is absent). Final clinician validation & signature are mandatory.\n"
+            "- **Hardware & Latency**: Desktop PC workstation only (`2.38 GB` GGUF, excluded from mobile APKs). Use persistent "
+            "`LlamaServerClinicalBackend` (`llama-server` with `-ngl` GPU/Vulkan offloading when available) to avoid per-turn cold reload latency."
+        )
+    elif t_key == "kuu-ius":
+        limitations_block = (
+            "- **Mandatory Legal Citation Verification**: Standalone 4B parametric legal weights can fabricate article numbers "
+            "or succession arithmetic if ungrounded. In production, **MUST** be paired with `sautilm_codes_rdc.sqlite` FTS5 retrieval, "
+            "`sautilm_sdk.LegalCitationVerifier` (post-generation article & OHADA acronym audit), and `compute_drc_succession()`.\n"
+            "- **Hardware**: Desktop legal workstation only (`2.38 GB` GGUF, excluded from mobile APKs)."
+        )
+    elif t_key == "kuu-stem":
+        limitations_block = (
+            "- **Mandatory Deterministic `<calc>` / STEM Solver**: Fits mobile budget (`549.58 MB <= 650 MB` INT4 `dynamic_wi4b32_afp32`), "
+            "but 1B parametric weights still make algebraic/arithmetic errors unless paired with `sautilm_sdk.solve_stem_formula_prompt()` "
+            "and `solve_calc_tags()`."
+        )
+    elif t_key == "nuru-agri":
+        limitations_block = (
+            "- **Dataset-Cueing & Field Validation Notice**: Trained strictly on `4,032` authentic crop photos (`0` synthetic images, "
+            "`92.06%` val acc, `92.31%` Macro-F1, `87.5%` real INT8 TFLite accuracy). Because several classes originate from single open datasets, "
+            "an out-of-distribution field validation campaign on smallholder smartphone photos in DRC/EAC is required prior to phytosanitary certification."
+        )
+    else:
+        limitations_block = (
+            "- **Strict 270M Tier Safety Policy (`sautilm_sdk.MODEL_TIER_POLICY`)**: At `270M` parameters, parametric reasoning and "
+            "1,150-entry lexical recall hit a hard capacity ceiling after INT8 quantization. In production, `SautiLM-Jua*` models are strictly "
+            "restricted to intent routing and short RAG formatting — **NEVER** free-form pediatric dosing, ungrounded legal citations, "
+            "free-form crop diagnosis, or unaided Bbadha dictionary recall (use `BbadhaDeterministicLexiconEngine` & `sautilm_sdk` deterministic solvers)."
+        )
+
     return f"""---
 license: gemma
 base_model: {base_model}
@@ -437,6 +472,10 @@ Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile 
 | **Training / Validation Loss** | {steps} steps (LoRA `r={lora_r}, alpha={lora_alpha}`) / Train: `{final_loss}` / Best Val: `{val_loss_str}` |
 | **Runtime Verification** | {verified_badge} |
 | **Target Hardware** | {target_hw} |
+
+## Known Limitations & Mandatory Production Guardrails
+
+{limitations_block}
 
 ## Research & Founding Team (SautiLM / LosingTek)
 
