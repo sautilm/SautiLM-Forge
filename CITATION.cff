@@ -1,0 +1,62 @@
+cff-version: 1.2.0
+message: "If you use SautiLM-Jua or the SautiLM-Forge / SautiLM-Eval pipelines in your research or applications, please cite our official technical report via its Zenodo DOI."
+title: "SautiLM-Jua: Domain-Isolated On-Device Language Modeling, Tonal RAG Grounding, and Sovereign Edge Deployment for Low-Resource Languages of Eastern DR Congo"
+version: 1.5.1
+doi: 10.5281/zenodo.24445686
+date-released: 2026-11-22
+url: "https://doi.org/10.5281/zenodo.24445686"
+repository-code: "https://github.com/sautilm/SautiLM-Forge"
+repository-artifact: "https://huggingface.co/sautilm/SautiLM-Jua"
+license: Apache-2.0
+keywords:
+  - edge-ai
+  - low-resource-nlp
+  - bbadha
+  - kilendu
+  - kiswahili
+  - litert-lm
+  - gemma-3
+  - lora
+  - democratic-republic-of-the-congo
+authors:
+  - family-names: "Byona"
+    given-names: "Georges"
+    orcid: "https://orcid.org/0009-0007-6097-4340"
+    affiliation: "SautiLM Research (Bunia, DRC) & Catholic University of Eastern Africa (CUEA)"
+    email: "georgesbyona@gmail.com"
+  - family-names: "Imani"
+    given-names: "Abraham"
+    orcid: "https://orcid.org/0009-0000-7431-6153"
+    affiliation: "SautiLM Research & Université Catholique de Bukavu (UCB)"
+  - family-names: "Lokpari"
+    given-names: "Philippe"
+    affiliation: "Institut Supérieur Pédagogique de Bunia (ISP Bunia)"
+  - family-names: "Losinu"
+    given-names: "Jean de Dieu"
+    affiliation: "Strategic & Humanitarian Advisory (Former Coordinator, Bureau Diocésain de la Caritas Bunia), Bunia, Ituri, DRC"
+preferred-citation:
+  type: report
+  title: "SautiLM-Jua: Domain-Isolated On-Device Language Modeling, Tonal RAG Grounding, and Sovereign Edge Deployment for Low-Resource Languages of Eastern DR Congo"
+  doi: 10.5281/zenodo.24445686
+  url: "https://doi.org/10.5281/zenodo.24445686"
+  year: 2026
+  month: 11
+  institution:
+    name: "SautiLM Research"
+    city: "Bunia, Ituri"
+    country: "CD"
+  authors:
+    - family-names: "Byona"
+      given-names: "Georges"
+      orcid: "https://orcid.org/0009-0007-6097-4340"
+      affiliation: "SautiLM Research & Catholic University of Eastern Africa (CUEA)"
+    - family-names: "Imani"
+      given-names: "Abraham"
+      orcid: "https://orcid.org/0009-0000-7431-6153"
+      affiliation: "SautiLM Research & Université Catholique de Bukavu (UCB)"
+    - family-names: "Lokpari"
+      given-names: "Philippe"
+      affiliation: "Institut Supérieur Pédagogique de Bunia (ISP Bunia)"
+    - family-names: "Losinu"
+      given-names: "Jean de Dieu"
+      affiliation: "Strategic & Humanitarian Advisory (Former Coordinator, Bureau Diocésain de la Caritas Bunia), Bunia, Ituri, DRC"

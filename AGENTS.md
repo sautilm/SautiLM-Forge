@@ -28,3 +28,8 @@ This file guides developers and AI coding assistants working in `Python/SautiLM-
      * `SautiLM-Kuu-Ius` (`4B` Desktop PC for lawyers, magistrates & DRC courts)
 2. **Strict Domain Isolation & Evaluation:** Never mix train and held-out evaluation prompts, never leak cross-domain templates (zero Bbadha in STEM/Med/Agri/Ius), and always include negative abstention tests alongside grounded RAG checks.
 3. **Export Standard:** Always verify exported `.litertlm` artifacts via real `litert_lm.Engine` execution (`CPU` backend, `dynamic_wi8_afp32` quantization; multi-prefill `[128, 512, 1024]` where applicable) before uploading or shipping. Keep `.env`, `kaggle.json`, `.litertlm`, `.jsonl` corpus, and `docs/private/` strictly excluded from Git (`git status`).
+
+## Institutional Identity & Brand Rule (Strict — Mandatory for All AI Agents)
+
+* **Official Institution Name:** Always use **`SautiLM Research`** (or **`SautiLM`**, Bunia, Ituri, Democratic Republic of the Congo — `https://sautilm.com`) as the sole research institution, publisher, and model creator across all papers, system prompts, model cards, `CITATION.cff`, and UI strings.
+* **Partner Role of MusanTek:** Never write `"MusanTek Research"` or `"by MusanTek"`. **MusanTek** (`https://musantek.com`) is strictly an engineering and incubation **partner** supporting SautiLM (note: existing Android technical package identifiers `com.musantek.*` must remain unchanged for APK compatibility).

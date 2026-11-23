@@ -1,12 +1,16 @@
 # SautiLM-Forge
 
-**SautiLM-Forge** is the official corpus engineering, LoRA fine-tuning, and sub-150 MB mobile Edge-AI packaging pipeline developed by **MusanTek Research** (Bunia, Ituri, Democratic Republic of the Congo).
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24445686.svg)](https://doi.org/10.5281/zenodo.24445686) [![ORCID](https://img.shields.io/badge/ORCID-0009-0007-6097-4340-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0007-6097-4340)
+
+**SautiLM-Forge** is the official corpus engineering, LoRA fine-tuning, and sub-150 MB mobile Edge-AI packaging pipeline developed by **SautiLM Research** (Bunia, Ituri, Democratic Republic of the Congo).
 
 It powers the **SautiLM** family of offline mobile language models engineered for low-resource African languages (starting with **Bbadha / Kilendu** and **Congolese Swahili**) and critical community domains in Eastern DRC.
 
 - **Official Website**: [https://sautilm.com](https://sautilm.com)
 - **Hugging Face Model Hub (`SautiLM Jua`)**: [https://huggingface.co/sautilm/SautiLM-Jua](https://huggingface.co/sautilm/SautiLM-Jua)
-- **Organization**: MusanTek Research (Bunia, Ituri, DRC)
+- **Research Paper (Official DOI)**: [10.5281/zenodo.24445686](https://doi.org/10.5281/zenodo.24445686)
+- **Lead Author ORCID**: [0009-0007-6097-4340](https://orcid.org/0009-0007-6097-4340)
+- **Organization**: SautiLM Research (Bunia, Ituri, DRC)
 
 ---
 
@@ -81,14 +85,33 @@ python src/kaggle_orchestrator.py status
 
 ---
 
-## 4. Founding & Research Team (MusanTek Research)
+## 4. Founding & Research Team (SautiLM Research)
 
-- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / MusanTek)
-- **Abraham Imani** - Co-Founder & AI/ML Lead (Université Catholique de Bukavu)
-- **Jacques Uwonda** - Co-Founder & Software Engineer (Université Shalom de Bunia)
+- **Georges Byona** ([ORCID: `0009-0007-6097-4340`](https://orcid.org/0009-0007-6097-4340)) - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / SautiLM Research)
+- **Abraham Imani** ([ORCID: `0009-0000-7431-6153`](https://orcid.org/0009-0000-7431-6153)) - Co-Founder & AI/ML Lead (Université Catholique de Bukavu)
 
 ---
 
-## 5. License
+## 5. Academic Citation (BibTeX & ORCID)
+
+If you use **SautiLM-Jua** or the **SautiLM-Forge** pipeline in your research or field deployments, please cite:
+
+```bibtex
+@techreport{byona2026sautilmjua,
+  title       = {{SautiLM-Jua}: Domain-Isolated On-Device Language Modeling, Tonal {RAG} Grounding, and Sovereign Edge Deployment for Low-Resource Languages of Eastern {DR Congo}},
+  author      = {Byona, Georges and Imani, Abraham and Lokpari, Philippe and Losinu, Jean de Dieu},
+  institution = {SautiLM Research},
+  address     = {Bunia, Ituri, Democratic Republic of the Congo},
+  year        = {2026},
+  month       = nov,
+  doi         = {10.5281/zenodo.24445686},
+  url         = {https://doi.org/10.5281/zenodo.24445686},
+  note        = {Authors ORCID: Georges Byona (0009-0007-6097-4340), Abraham Imani (0009-0000-7431-6153). Artifacts: https://huggingface.co/sautilm/SautiLM-Jua and https://github.com/sautilm/SautiLM-Forge}
+}
+```
+
+---
+
+## 6. License
 
 Code in this repository is licensed under the **Apache License 2.0** (see [LICENSE](LICENSE)). Model weights derived from Google Gemma are subject to the **Gemma Terms of Use**.

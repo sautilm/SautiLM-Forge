@@ -45,7 +45,7 @@ class TestModularForgePipeline(unittest.TestCase):
         self.assertEqual(len(suite), 10)
 
         clean_outputs = {
-            "stem_identity_fr": "Je suis SautiLM-Jua-STEM de MusanTek Research pour l'enseignement secondaire et les examens.",
+            "stem_identity_fr": "Je suis SautiLM-Jua-STEM de SautiLM Research pour l'enseignement secondaire et les examens.",
             "stem_quad_fr": "Discriminant Delta = 144, donc les racines sont x1 = 3 et x2 = -1.",
             "stem_integral_fr": "Une primitive de cos(x) est sin(x) ; l'integrale vaut 1.",
             "stem_qcm_math_fr": "Bonne reponse : B) {3 ; 4} car 3 + 4 = 7 et 3 * 4 = 12.",

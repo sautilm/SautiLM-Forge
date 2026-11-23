@@ -515,7 +515,7 @@ pipeline_tag: {pipeline_tag}
 
 # {cfg['model_name']} (Offline Edge-AI Model - {size_mb} MB)
 
-**{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **MusanTek Research** for **SautiLM**.
+**{cfg['model_name']}** is a sovereign 100% offline Edge-AI model engineered in **Bunia, Ituri, Democratic Republic of the Congo** by **SautiLM Research** for **SautiLM**.
 
 Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile standard, **SautiLM-Nuru** `TFLite <= 45 MB` collaborative vision classifiers powering **Juamea**, **SautiLM-Kuu** `1B` mobile / `4B` Desktop workstations, and the planned **SautiLM-Radi** `< 50 ms` ultra-fast Flash tier). {intro_data_desc}
 
@@ -546,14 +546,18 @@ Part of SautiLM's strict multi-tier architecture (**SautiLM-Jua** `270M` mobile 
 
 {limitations_block}
 
-## Research & Founding Team (SautiLM / MusanTek)
+## Research & Founding Team (SautiLM Research)
 
-- **Georges Byona** - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / MusanTek)
-- **Abraham Imani** - Co-Founder, MSc Student & AI/ML Lead (Université Catholique de Bukavu)
-- **Jacques Uwonda** - Co-Founder, MSc Student & Software Engineer (Université Shalom de Bunia)
+- **Georges Byona** ([ORCID: 0009-0007-6097-4340](https://orcid.org/0009-0007-6097-4340)) - Co-Founder, Software Engineer & Edge-AI Researcher (Catholic University of Eastern Africa / SautiLM Research)
+- **Abraham Imani** ([ORCID: `0009-0000-7431-6153`](https://orcid.org/0009-0000-7431-6153)) - Co-Founder, MSc Student & AI/ML Lead (Université Catholique de Bukavu)
+
+## Citation (Official DOI & BibTeX)
+
+- **Technical Report DOI**: [10.5281/zenodo.24445686](https://doi.org/10.5281/zenodo.24445686)
+- **Lead Author ORCID**: [0009-0007-6097-4340](https://orcid.org/0009-0007-6097-4340)
 
 Website: [https://sautilm.com](https://sautilm.com)
-Engineered & Supported by [MusanTek](https://musantek.com)
+Institution: **SautiLM Research** ([https://sautilm.com](https://sautilm.com)) • Technical Partner: [MusanTek](https://musantek.com)
 """
 
 

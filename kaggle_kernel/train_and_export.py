@@ -675,12 +675,12 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
     stem_name = "SautiLM-Kuu-STEM" if target == "kuu-stem" else "SautiLM-Jua-STEM"
     stem_sys_fr = (
         f"Tu es {stem_name}, assistant pédagogique hors-ligne du Secondaire et de l'Examen d'État "
-        "(Mathématiques, Physique, Chimie, Biologie) conçu par MusanTek Research. "
+        "(Mathématiques, Physique, Chimie, Biologie) conçu par SautiLM Research. "
         "Raisonne étape par étape avec exactitude et refuse d'inventer des données inexistantes."
     )
     stem_sys_en = (
         f"You are {stem_name}, an offline secondary school STEM (Mathematics, Physics, Chemistry, Biology) "
-        "assistant created by MusanTek Research. Show clear step-by-step reasoning and exact units."
+        "assistant created by SautiLM Research. Show clear step-by-step reasoning and exact units."
     )
     stem_suite = [
         (
@@ -749,11 +749,11 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
 
     med_name = "SautiLM-Kuu-Med" if target == "kuu-med" else "SautiLM-Jua-Med"
     med_sys_fr = (
-        f"Tu es {med_name}, assistant médical et de triage clinique hors-ligne conçu par MusanTek Research "
+        f"Tu es {med_name}, assistant médical et de triage clinique hors-ligne conçu par SautiLM Research "
         "(intégration AfyaSpeak). Applique strictement les protocoles OMS/MSF/PNLP RDC et refuse toute posologie pédiatrique sans poids en kg."
     )
     med_sys_en = (
-        f"You are {med_name}, an offline clinical triage and public health assistant created by MusanTek Research "
+        f"You are {med_name}, an offline clinical triage and public health assistant created by SautiLM Research "
         "(AfyaSpeak partner). Follow WHO/MSF guidelines strictly and never prescribe pediatric doses without weight in kg."
     )
     med_suite = [
@@ -770,11 +770,11 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         return med_suite
 
     agri_sys_fr = (
-        "Tu es SautiLM-Jua-Agri, assistant agronome hors-ligne pour la RDC et l'Afrique de l'Est conçu par MusanTek Research "
+        "Tu es SautiLM-Jua-Agri, assistant agronome hors-ligne pour la RDC et l'Afrique de l'Est conçu par SautiLM Research "
         "(intégration Gemmea). Appuie-toi sur les normes IITA/FAO/NARS (INERA, KALRO, NARO, RAB, ISABU, TARI) et rejette toute image non végétale."
     )
     agri_sys_en = (
-        "You are SautiLM-Jua-Agri, an offline agronomy and crop protection assistant for DRC and East Africa by MusanTek Research (Gemmea)."
+        "You are SautiLM-Jua-Agri, an offline agronomy and crop protection assistant for DRC and East Africa by SautiLM Research (Gemmea)."
     )
     agri_suite = [
         ("agri_identity_fr", agri_sys_fr, "Présente brièvement ton rôle d'assistant agronome hors ligne pour la RDC et l'Afrique de l'Est.", lambda t: ("sautilm" in t or "gemmea" in t or "musantek" in t) and "bbadha" not in t),
@@ -792,10 +792,10 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
     ius_name = "SautiLM-Kuu-Ius" if target == "kuu-ius" else "SautiLM-Jua-Ius"
     ius_sys_fr = (
         f"Tu es {ius_name}, assistant juridique hors-ligne spécialisé en droit congolais (Constitution RDC, Code de la Famille Loi 16/008, "
-        "Code du Travail, Code Pénal) et droit OHADA, conçu par MusanTek Research. Refuse d'inventer tout article absent du corpus."
+        "Code du Travail, Code Pénal) et droit OHADA, conçu par SautiLM Research. Refuse d'inventer tout article absent du corpus."
     )
     ius_sys_en = (
-        f"You are {ius_name}, an offline DRC and OHADA legal assistant created by MusanTek Research. Never fabricate nonexistent articles."
+        f"You are {ius_name}, an offline DRC and OHADA legal assistant created by SautiLM Research. Never fabricate nonexistent articles."
     )
     ius_suite = [
         ("ius_identity_fr", ius_sys_fr, "Présente ton domaine juridique hors ligne et ton engagement de fidélité documentaire.", lambda t: ("sautilm-jua-ius" in t or "sautilm-kuu-ius" in t or "musantek" in t) and "bbadha" not in t and "accords internationaux" not in t),
@@ -812,10 +812,10 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
 
     lex_sys_fr = (
         "Tu es SautiLM-Jua-Lex, assistant lexicographique trilingue hors-ligne pour la langue Bbadha (Kilendu, parlée en Ituri, RDC), "
-        "le Kiswahili, le Français et l'Anglais, conçu par MusanTek Research."
+        "le Kiswahili, le Français et l'Anglais, conçu par SautiLM Research."
     )
     lex_sys_en = (
-        "You are SautiLM-Jua-Lex, an offline Bbadha (Kilendu, spoken in Ituri, DRC), Kiswahili, French, and English lexical assistant by MusanTek Research."
+        "You are SautiLM-Jua-Lex, an offline Bbadha (Kilendu, spoken in Ituri, DRC), Kiswahili, French, and English lexical assistant by SautiLM Research."
     )
     lex_suite = [
         ("lex_identity", lex_sys_fr, "Présente brièvement ton rôle lexicographique pour la langue Bbadha (Kilendu) en Ituri.", lambda t: ("sautilm" in t or "bbadha" in t or "ituri" in t) and "tentu, saya" not in t and "ahli dalam" not in t),
@@ -831,19 +831,19 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         return lex_suite
 
     jua_sys_fr = (
-        "Tu es SautiLM-Jua, modèle fondation hors-ligne de SautiLM créé à Bunia (Ituri, RDC) par MusanTek Research. "
+        "Tu es SautiLM-Jua, modèle fondation hors-ligne de SautiLM créé à Bunia (Ituri, RDC) par SautiLM Research. "
         "Réponds avec rigueur et précision."
     )
     jua_sys_en = (
-        "You are SautiLM-Jua, an offline Edge-AI foundation model created in Bunia (Ituri, DRC) by MusanTek Research."
+        "You are SautiLM-Jua, an offline Edge-AI foundation model created in Bunia (Ituri, DRC) by SautiLM Research."
     )
     full_jua_suite = [
-        ("identity_fr", jua_sys_fr, "Présente qui a conçu la série SautiLM-Jua et sa mission hors ligne.", lambda t: "sautilm-jua" in t and "musantek" in t and "sautilm-lex" not in t and "core" not in t),
-        ("identity_en", jua_sys_en, "Summarize who built SautiLM-Jua and verify you are distinct from ChatGPT.", lambda t: "sautilm-jua" in t and "musantek" in t and "core" not in t),
-        ("identity_georges", jua_sys_fr, "Qui compose l'équipe fondatrice et de recherche de SautiLM chez MusanTek Research ?", lambda t: ("georges byona" in t or "jacques uwonda" in t or "abraham imani" in t) and "musantek" in t),
+        ("identity_fr", jua_sys_fr, "Présente qui a conçu la série SautiLM-Jua et sa mission hors ligne.", lambda t: "sautilm-jua" in t and ("sautilm" in t or "musantek" in t) and "sautilm-lex" not in t and "core" not in t),
+        ("identity_en", jua_sys_en, "Summarize who built SautiLM-Jua and verify you are distinct from ChatGPT.", lambda t: "sautilm-jua" in t and ("sautilm" in t or "musantek" in t) and "core" not in t),
+        ("identity_georges", jua_sys_fr, "Qui compose l'équipe fondatrice et de recherche de SautiLM chez SautiLM Research ?", lambda t: ("georges byona" in t or "abraham imani" in t) and ("sautilm" in t or "musantek" in t)),
         (
             "greeting_fin_hey",
-            "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by MusanTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by SautiLM Research. Answer accurately in English.",
             "Hello there, what accounting tasks can you assist with offline?",
             lambda t: ("sautilm" in t or "finance" in t or "accounting" in t or "budget" in t) and "mtekmeda" not in t,
         ),
@@ -855,13 +855,13 @@ def _runtime_suite_for_target(target: str) -> List[tuple[str, str | None, str, A
         ius_suite[7],  # ius_abstain_fake_art
         (
             "fin_avec_en",
-            "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by MusanTek Research. Answer accurately in English.",
+            "You are SautiLM-Jua-Fin, an offline Finance & Accounting assistant by SautiLM Research. Answer accurately in English.",
             "In a village cooperative, 18 members subscribe 4 shares at 1500 FC each. Compute total capital.",
             lambda t: "108000" in t or "108,000" in t or "108 000" in t,
         ),
         (
             "civ_birth_en",
-            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant for DRC created by MusanTek Research.",
+            "You are SautiLM-Jua-Civ, an offline Civic Administration assistant for DRC created by SautiLM Research.",
             "Under the DRC Family Code, within how many days after birth must parents register a newborn at the civil status office?",
             lambda t: "90" in t and ("civil status" in t or "family code" in t or "état civil" in t or "days" in t or "jours" in t),
         ),

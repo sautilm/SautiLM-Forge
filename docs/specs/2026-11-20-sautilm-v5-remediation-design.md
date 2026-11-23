@@ -1,7 +1,7 @@
 # Spécification Architecturale v5 : Remédiation Complète Post-Audit v4 (`7.0 -> 9.0+ / 10`)
 
 **Date :** 20 novembre 2026  
-**Auteur :** MusanTek Research — Équipe SautiLM  
+**Auteur :** SautiLM Research — Équipe SautiLM  
 **Statut :** Approuvé en design (`Approche A — Contrats Déterministes Partagés SDK + Ré-entraînement Ciblé Val/Test Séparé`)
 
 ---
